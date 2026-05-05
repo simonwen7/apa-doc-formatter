@@ -1,0 +1,26 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/app/__pycache__/
+*.pyc
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Environment files
+.env
+backend/.env
+frontend/.env
+
+# Storage / uploaded/generated files
+backend/storage/uploads/
+backend/storage/fixed/
+
+# Mac
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,39 @@
+{
+    "template_id": "apa7-student",
+    "name": "APA 7 Student Paper",
+    "page": {
+      "paper_size": "letter",
+      "margin_top_in": 1.0,
+      "margin_bottom_in": 1.0,
+      "margin_left_in": 1.0,
+      "margin_right_in": 1.0
+    },
+    "body": {
+      "font_name": "Times New Roman",
+      "font_size_pt": 12,
+      "line_spacing": 2.0,
+      "space_before_pt": 0,
+      "space_after_pt": 0,
+      "first_line_indent_in": 0.5,
+      "alignment": "left"
+    },
+    "title": {
+      "bold": true,
+      "center": true
+    },
+    "headings": {
+      "level1": {
+        "bold": true,
+        "center": true
+      },
+      "level2": {
+        "bold": true,
+        "align": "left"
+      }
+    },
+    "references": {
+      "title_text": "References",
+      "line_spacing": 2.0,
+      "hanging_indent_in": 0.5
+    }
+  }
