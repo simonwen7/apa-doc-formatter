@@ -1,4 +1,5 @@
 import { useState } from "react";
+import penIcon from "./assets/pen-icon.png";
 import { VIDEO_SRC, usePrefersReducedMotion } from "./hooks/useAtmosphere";
 import { supabase } from "./supabaseClient";
 
@@ -108,8 +109,11 @@ function Auth() {
 
         <div className="authBrandContent">
           <span className="authLogo">
-            Forma APA
-            <mark>®</mark>
+            <img src={penIcon} alt="" className="brandLogoIcon" aria-hidden="true" />
+            <span>
+              Forma APA
+              <mark>®</mark>
+            </span>
           </span>
 
           <h1>Better formatting. More time for your ideas.</h1>
@@ -139,8 +143,11 @@ function Auth() {
         <div className="authCard">
           <div className="authHeading">
             <span className="mobileAuthLogo authLogo">
-              Forma APA
-              <mark>®</mark>
+              <img src={penIcon} alt="" className="brandLogoIcon" aria-hidden="true" />
+              <span>
+                Forma APA
+                <mark>®</mark>
+              </span>
             </span>
 
             <h2>{isRegistering ? "Create your account" : "Welcome back"}</h2>

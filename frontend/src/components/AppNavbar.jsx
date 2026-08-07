@@ -1,4 +1,5 @@
 import { useState } from "react";
+import penIcon from "../assets/pen-icon.png";
 
 const NAV_ITEMS = [
   { id: "formatter", label: "Formatter", href: "#workspace" },
@@ -26,8 +27,11 @@ export default function AppNavbar({
     <nav className="appNavbar" aria-label="Primary">
       <div className="appNavbarInner">
         <a className="brandLogo" href="#top" onClick={closeMenu}>
-          Forma APA
-          <mark>®</mark>
+          <img src={penIcon} alt="" className="brandLogoIcon" aria-hidden="true" />
+          <span>
+            Forma APA
+            <mark>®</mark>
+          </span>
         </a>
 
         <div className="navLinks">

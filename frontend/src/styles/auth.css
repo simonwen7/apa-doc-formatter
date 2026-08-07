@@ -51,11 +51,17 @@
 
 .authLogo {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 28px;
   font-family: var(--font-display);
   font-size: 2rem;
   letter-spacing: -0.03em;
+}
+
+.authLogo .brandLogoIcon {
+  width: 1.1em;
+  height: 1.1em;
 }
 
 .authLogo mark {
