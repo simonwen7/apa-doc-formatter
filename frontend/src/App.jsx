@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import Auth from "./Auth";
+import AtmosphereBackground from "./components/AtmosphereBackground";
+import AppNavbar from "./components/AppNavbar";
 import FormatterApp from "./FormatterApp";
 import { supabase } from "./supabaseClient";
-import "./App.css";
 
 function App() {
   const [session, setSession] = useState(null);
@@ -69,26 +70,21 @@ function App() {
   }
 
   return (
-    <>
-      <header className="accountHeader">
-        <div className="accountHeaderInner">
-          <div className="accountIdentity">
-            <strong>APA Formatter</strong>
-            <span>{session.user.email}</span>
-          </div>
+    <div id="top" className="appRoot">
+      <AtmosphereBackground />
 
-          <button type="button" onClick={handleSignOut}>
-            Sign out
-          </button>
-        </div>
+      <div className="appContent">
+        <AppNavbar session={session} onSignOut={handleSignOut} />
 
         {signOutError && (
-          <p className="headerError">{signOutError}</p>
+          <p className="headerError" role="alert">
+            {signOutError}
+          </p>
         )}
-      </header>
 
-      <FormatterApp />
-    </>
+        <FormatterApp />
+      </div>
+    </div>
   );
 }
 

@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { VIDEO_SRC, usePrefersReducedMotion } from "./hooks/useAtmosphere";
 import { supabase } from "./supabaseClient";
 
 function Auth() {
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -50,14 +52,13 @@ function Auth() {
 
     try {
       if (isRegistering) {
-        const { data, error: signUpError } =
-          await supabase.auth.signUp({
-            email: normalizedEmail,
-            password,
-            options: {
-              emailRedirectTo: window.location.origin,
-            },
-          });
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password,
+          options: {
+            emailRedirectTo: window.location.origin,
+          },
+        });
 
         if (signUpError) {
           throw signUpError;
@@ -69,11 +70,10 @@ function Auth() {
           );
         }
       } else {
-        const { error: signInError } =
-          await supabase.auth.signInWithPassword({
-            email: normalizedEmail,
-            password,
-          });
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
 
         if (signInError) {
           throw signInError;
@@ -81,8 +81,7 @@ function Auth() {
       }
     } catch (requestError) {
       setError(
-        requestError?.message ||
-          "Authentication failed. Please try again."
+        requestError?.message || "Authentication failed. Please try again."
       );
     } finally {
       setLoading(false);
@@ -91,15 +90,32 @@ function Auth() {
 
   return (
     <main className="authPage">
-      <section className="authBrandPanel">
-        <div className="authBrandContent">
-          <span className="authLogo">APA 7</span>
+      <section className="authBrandPanel" aria-hidden={false}>
+        {prefersReducedMotion ? (
+          <div className="authBrandStatic" aria-hidden="true" />
+        ) : (
+          <video
+            className="authBrandVideo"
+            src={VIDEO_SRC}
+            autoPlay
+            loop
+            muted
+            playsInline
+            aria-hidden="true"
+          />
+        )}
+        <div className="authBrandOverlay" aria-hidden="true" />
 
-          <h1>Format academic documents with confidence.</h1>
+        <div className="authBrandContent">
+          <span className="authLogo">
+            Forma APA
+            <mark>®</mark>
+          </span>
+
+          <h1>Better formatting. More time for your ideas.</h1>
 
           <p>
-            Analyze and correct your APA 7 Word document before
-            submitting it.
+            Analyze and correct your APA 7 Word document before submitting it.
           </p>
 
           <ul className="authBenefits">
@@ -107,12 +123,10 @@ function Auth() {
               <span>✓</span>
               Detect formatting problems
             </li>
-
             <li>
               <span>✓</span>
               Apply automatic corrections
             </li>
-
             <li>
               <span>✓</span>
               Download the corrected document
@@ -121,21 +135,20 @@ function Auth() {
         </div>
       </section>
 
-      <section className="authFormPanel">
+      <section className="authFormPanel" id="auth-form">
         <div className="authCard">
           <div className="authHeading">
-            <span className="mobileAuthLogo">APA Formatter</span>
+            <span className="mobileAuthLogo authLogo">
+              Forma APA
+              <mark>®</mark>
+            </span>
 
-            <h2>
-              {isRegistering
-                ? "Create your account"
-                : "Welcome back"}
-            </h2>
+            <h2>{isRegistering ? "Create your account" : "Welcome back"}</h2>
 
             <p>
               {isRegistering
                 ? "Create an account to format your documents."
-                : "Sign in to continue to APA Formatter."}
+                : "Sign in to continue to Forma APA."}
             </p>
           </div>
 
@@ -186,9 +199,7 @@ function Auth() {
                   id="auth-password"
                   type={showPassword ? "text" : "password"}
                   autoComplete={
-                    isRegistering
-                      ? "new-password"
-                      : "current-password"
+                    isRegistering ? "new-password" : "current-password"
                   }
                   placeholder="Enter your password"
                   value={password}
@@ -203,24 +214,18 @@ function Auth() {
                 <button
                   type="button"
                   className="showPasswordButton"
-                  onClick={() =>
-                    setShowPassword((current) => !current)
-                  }
+                  onClick={() => setShowPassword((current) => !current)}
                 >
                   {showPassword ? "Hide" : "Show"}
                 </button>
               </div>
 
-              {isRegistering && (
-                <small>Use at least 8 characters.</small>
-              )}
+              {isRegistering && <small>Use at least 8 characters.</small>}
             </div>
 
             {isRegistering && (
               <div className="authField">
-                <label htmlFor="confirm-password">
-                  Confirm password
-                </label>
+                <label htmlFor="confirm-password">Confirm password</label>
 
                 <input
                   id="confirm-password"
@@ -268,7 +273,7 @@ function Auth() {
           <p className="authSwitchText">
             {isRegistering
               ? "Already have an account?"
-              : "New to APA Formatter?"}
+              : "New to Forma APA?"}
 
             <button
               type="button"

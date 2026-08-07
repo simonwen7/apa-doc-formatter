@@ -1,6 +1,6 @@
 from docx import Document
 from app.core.config import TEMPLATES_DIR
-from app.utils.docx_helpers import load_json_file
+from app.utils.json_helpers import load_json_file
 
 
 def load_template(template_id: str) -> dict:

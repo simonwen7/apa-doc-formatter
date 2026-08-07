@@ -1,5 +1,8 @@
-import { useMemo, useRef, useState } from "react";
-import "./Formatter.css";
+import { useEffect, useMemo, useRef, useState } from "react";
+import DocumentInputPanel from "./components/DocumentInputPanel";
+import HeroSection from "./components/HeroSection";
+import HowItWorks from "./components/HowItWorks";
+import PaperSetupPanel from "./components/PaperSetupPanel";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL ||
@@ -67,8 +70,9 @@ function getFriendlyFixLabel(key) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function App() {
+function FormatterApp() {
   const fileInputRef = useRef(null);
+  const workspaceRef = useRef(null);
 
   const [file, setFile] = useState(null);
   const [templateId, setTemplateId] = useState(TEMPLATE_OPTIONS[0].id);
@@ -77,8 +81,18 @@ function App() {
   const [fixResult, setFixResult] = useState(null);
   const [error, setError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
+  const [activeTab, setActiveTab] = useState("upload");
 
   const isLoading = Boolean(loadingAction);
+  const hasWorkspaceContent = Boolean(
+    file || analyzeResult || fixResult || loadingAction
+  );
+
+  useEffect(() => {
+    if (analyzeResult || fixResult || loadingAction) {
+      setActiveTab("preview");
+    }
+  }, [analyzeResult, fixResult, loadingAction]);
 
   const issueCount = Number(analyzeResult?.summary?.issue_count ?? 0);
   const score = Math.max(
@@ -148,6 +162,7 @@ function App() {
     setFixResult(null);
     setError("");
     setLoadingAction("");
+    setActiveTab("upload");
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -177,6 +192,7 @@ function App() {
 
     setFile(selectedFile);
     resetResults();
+    setActiveTab("upload");
   };
 
   const handleFileChange = (event) => {
@@ -197,9 +213,14 @@ function App() {
     resetResults();
   };
 
+  const scrollToWorkspace = () => {
+    workspaceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const handleAnalyze = async () => {
     if (!file) {
       setError("Please upload a Word document before continuing.");
+      setActiveTab("upload");
       return;
     }
 
@@ -207,6 +228,7 @@ function App() {
     setError("");
     setAnalyzeResult(null);
     setFixResult(null);
+    setActiveTab("preview");
 
     try {
       const formData = new FormData();
@@ -236,6 +258,7 @@ function App() {
         requestError.message ||
           "We could not analyze this document. Please try again."
       );
+      setActiveTab("upload");
     } finally {
       setLoadingAction("");
     }
@@ -244,12 +267,14 @@ function App() {
   const handleFix = async () => {
     if (!file) {
       setError("Please upload a Word document before continuing.");
+      setActiveTab("upload");
       return;
     }
 
     setLoadingAction("fix");
     setError("");
     setFixResult(null);
+    setActiveTab("preview");
 
     try {
       const formData = new FormData();
@@ -279,6 +304,7 @@ function App() {
         requestError.message ||
           "We could not format this document. Please try again."
       );
+      setActiveTab("upload");
     } finally {
       setLoadingAction("");
     }
@@ -301,97 +327,67 @@ function App() {
 
   const downloadUrl = getDownloadUrl();
 
-  const getStepState = (step) => {
-    if (step === "upload") {
-      return file ? "completed" : "active";
-    }
-
-    if (step === "analyze") {
-      if (analyzeResult) return "completed";
-      if (file) return "active";
-      return "";
-    }
-
-    if (step === "fix") {
-      if (fixResult) return "completed";
-      if (analyzeResult) return "active";
-      return "";
-    }
-
-    if (step === "download") {
-      return fixResult ? "active" : "";
-    }
-
-    return "";
-  };
-
   return (
-    <main className="appShell">
-      <header className="hero">
-        <div className="brandBadge">APA 7</div>
+    <div className="formatterShell">
+      {!hasWorkspaceContent && (
+        <HeroSection onFormatClick={scrollToWorkspace} />
+      )}
 
-        <h1>APA Document Formatter</h1>
-
-        <p className="heroDescription">
-          Check and correct APA 7 formatting in your Word document.
-        </p>
-      </header>
-
-      <section className="stepper" aria-label="Document formatting progress">
-        {[
-          ["upload", "Upload"],
-          ["analyze", "Analyze"],
-          ["fix", "Fix"],
-          ["download", "Download"],
-        ].map(([key, label], index) => {
-          const state = getStepState(key);
-
-          return (
-            <div
-              className={`step ${state}`}
-              key={key}
-              aria-current={state === "active" ? "step" : undefined}
-            >
-              <div className="stepNumber">
-                {state === "completed" ? "✓" : index + 1}
-              </div>
-              <span>{label}</span>
-            </div>
-          );
-        })}
-      </section>
-
-      <section className="card uploadCard">
-        <div className="cardHeader">
+      <section
+        id="workspace"
+        className="workspaceSection"
+        ref={workspaceRef}
+        aria-labelledby="workspace-heading"
+      >
+        <div className="workspaceHeader">
           <div>
-            <p className="eyebrow">Step 1</p>
-            <h2>Upload your document</h2>
+            <h2 id="workspace-heading">Prepare your document</h2>
+            <p>
+              Add your content and choose how the paper should be structured.
+            </p>
           </div>
 
-          {file && (
-            <button
-              type="button"
-              className="textButton"
-              onClick={resetWorkflow}
-              disabled={isLoading}
-            >
-              Start over
-            </button>
-          )}
+          <span className="templateBadge">APA 7 Student Paper</span>
         </div>
 
-        <input
-          ref={fileInputRef}
-          id="document-upload"
-          className="hiddenFileInput"
-          type="file"
-          accept=".docx"
-          onChange={handleFileChange}
-        />
+        <div className="workspaceGrid">
+          <PaperSetupPanel
+            templateId={templateId}
+            templateOptions={TEMPLATE_OPTIONS}
+            onTemplateChange={handleTemplateChange}
+            isLoading={isLoading}
+            onAnalyze={handleAnalyze}
+            onFix={handleFix}
+            onAnalyzeAgain={handleAnalyze}
+            file={file}
+            analyzeResult={analyzeResult}
+            fixResult={fixResult}
+            issueCount={issueCount}
+            loadingAction={loadingAction}
+          />
 
-        {!file ? (
-          <div
-            className={`dropZone ${isDragging ? "dragging" : ""}`}
+          <DocumentInputPanel
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            fileInputRef={fileInputRef}
+            file={file}
+            isDragging={isDragging}
+            isLoading={isLoading}
+            error={error}
+            loadingAction={loadingAction}
+            analyzeResult={analyzeResult}
+            fixResult={fixResult}
+            issueCount={issueCount}
+            score={score}
+            scoreLabel={getScoreLabel()}
+            scoreTone={getScoreTone()}
+            groupedIssues={groupedIssues}
+            visibleFixedCounts={visibleFixedCounts}
+            totalFixed={totalFixed}
+            downloadUrl={downloadUrl}
+            formatFileSize={formatFileSize}
+            onFileChange={handleFileChange}
+            onDrop={handleDrop}
             onDragEnter={(event) => {
               event.preventDefault();
               setIsDragging(true);
@@ -401,353 +397,17 @@ function App() {
               setIsDragging(true);
             }}
             onDragLeave={() => setIsDragging(false)}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                fileInputRef.current?.click();
-              }
-            }}
-            role="button"
-            tabIndex={0}
-          >
-            <div className="uploadIcon" aria-hidden="true">
-              ↑
-            </div>
-
-            <h3>Drag and drop your .docx file</h3>
-            <p>
-              or <span>browse files</span> from your computer
-            </p>
-
-            <small>Microsoft Word .docx · Maximum size 10 MB</small>
-          </div>
-        ) : (
-          <div className="selectedFile">
-            <div className="fileIcon" aria-hidden="true">
-              DOCX
-            </div>
-
-            <div className="selectedFileDetails">
-              <strong>{file.name}</strong>
-              <span>{formatFileSize(file.size)}</span>
-            </div>
-
-            <button
-              type="button"
-              className="removeFileButton"
-              onClick={resetWorkflow}
-              disabled={isLoading}
-              aria-label="Remove selected file"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        <div className="fieldGroup">
-          <label htmlFor="template-select">Formatting template</label>
-
-          <select
-            id="template-select"
-            value={templateId}
-            onChange={handleTemplateChange}
-            disabled={isLoading}
-          >
-            {TEMPLATE_OPTIONS.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <p className="fieldHint">
-            More academic formatting templates can be added later.
-          </p>
-        </div>
-
-        {error && (
-          <div className="errorMessage" role="alert">
-            <span aria-hidden="true">!</span>
-            <p>{error}</p>
-          </div>
-        )}
-
-        <div className="actionArea">
-          {!analyzeResult && (
-            <button
-              type="button"
-              className="primaryButton"
-              onClick={handleAnalyze}
-              disabled={!file || isLoading}
-            >
-              {loadingAction === "analyze" && (
-                <span className="spinner" aria-hidden="true" />
-              )}
-
-              {loadingAction === "analyze"
-                ? "Analyzing document..."
-                : "Analyze Document"}
-            </button>
-          )}
-
-          {analyzeResult && !fixResult && issueCount > 0 && (
-            <>
-              <button
-                type="button"
-                className="primaryButton"
-                onClick={handleFix}
-                disabled={isLoading}
-              >
-                {loadingAction === "fix" && (
-                  <span className="spinner" aria-hidden="true" />
-                )}
-
-                {loadingAction === "fix"
-                  ? "Applying corrections..."
-                  : `Fix ${issueCount} Issues`}
-              </button>
-
-              <button
-                type="button"
-                className="secondaryButton"
-                onClick={handleAnalyze}
-                disabled={isLoading}
-              >
-                Analyze Again
-              </button>
-            </>
-          )}
-
-          {analyzeResult && !fixResult && issueCount === 0 && (
-            <button
-              type="button"
-              className="secondaryButton"
-              onClick={handleAnalyze}
-              disabled={isLoading}
-            >
-              Analyze Again
-            </button>
-          )}
+            onBrowse={() => fileInputRef.current?.click()}
+            onResetWorkflow={resetWorkflow}
+            onFix={handleFix}
+            onAnalyzeAgain={handleAnalyze}
+          />
         </div>
       </section>
 
-      {loadingAction === "analyze" && (
-        <section className="card loadingCard" aria-live="polite">
-          <span className="largeSpinner" aria-hidden="true" />
-
-          <div>
-            <h2>Analyzing your document</h2>
-            <p>
-              Checking margins, title page, typography, spacing and
-              references.
-            </p>
-          </div>
-        </section>
-      )}
-
-      {loadingAction === "fix" && (
-        <section className="card loadingCard" aria-live="polite">
-          <span className="largeSpinner" aria-hidden="true" />
-
-          <div>
-            <h2>Applying formatting corrections</h2>
-            <p>
-              This may take a few seconds. Please keep this page open.
-            </p>
-          </div>
-        </section>
-      )}
-
-      {analyzeResult && (
-        <section className="card resultCard">
-          <div className="resultHeading">
-            <div>
-              <p className="eyebrow">Analysis complete</p>
-              <h2>Formatting report</h2>
-              <p className="resultFilename">{analyzeResult.filename}</p>
-            </div>
-
-            <span className="statusBadge">
-              {analyzeResult.template === "apa7_student"
-                ? "APA 7 Student Paper"
-                : analyzeResult.template}
-            </span>
-          </div>
-
-          <div className="scoreSection">
-            <div className={`scoreCircle ${getScoreTone()}`}>
-              <strong>{score}</strong>
-              <span>/ 100</span>
-            </div>
-
-            <div className="scoreDetails">
-              <p className="scoreLabel">Formatting score</p>
-              <h3>{getScoreLabel()}</h3>
-
-              <div
-                className="scoreBar"
-                role="progressbar"
-                aria-label="Formatting score"
-                aria-valuemin="0"
-                aria-valuemax="100"
-                aria-valuenow={score}
-              >
-                <div
-                  className={`scoreFill ${getScoreTone()}`}
-                  style={{ width: `${score}%` }}
-                />
-              </div>
-
-              <p>
-                {issueCount === 0
-                  ? "No formatting issues were detected."
-                  : `${issueCount} formatting ${
-                      issueCount === 1 ? "issue was" : "issues were"
-                    } detected.`}
-              </p>
-            </div>
-          </div>
-
-          {Object.keys(groupedIssues).length > 0 ? (
-            <div className="issuesSection">
-              <div className="sectionHeading">
-                <div>
-                  <h3>Detected issues</h3>
-                  <p>Expand a category to review its details.</p>
-                </div>
-
-                <span className="issueCountBadge">{issueCount}</span>
-              </div>
-
-              <div className="issueGroups">
-                {Object.entries(groupedIssues).map(
-                  ([category, issues], index) => (
-                    <details
-                      className="issueGroup"
-                      key={category}
-                      open={index === 0}
-                    >
-                      <summary>
-                        <span>{category}</span>
-
-                        <span className="categoryCount">
-                          {issues.length}{" "}
-                          {issues.length === 1 ? "issue" : "issues"}
-                        </span>
-                      </summary>
-
-                      <ul>
-                        {issues.map((issue, issueIndex) => (
-                          <li key={`${category}-${issueIndex}`}>
-                            <span className="issueBullet" aria-hidden="true">
-                              !
-                            </span>
-                            <p>{issue.message}</p>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="successNotice">
-              <span aria-hidden="true">✓</span>
-
-              <div>
-                <strong>Your document looks properly formatted.</strong>
-                <p>
-                  Review the document before submitting it to confirm that all
-                  content is correct.
-                </p>
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
-      {fixResult && (
-        <section className="card completionCard">
-          <div className="completionIcon" aria-hidden="true">
-            ✓
-          </div>
-
-          <p className="eyebrow">Formatting complete</p>
-          <h2>Your corrected document is ready</h2>
-
-          <p className="completionDescription">
-            {totalFixed > 0
-              ? `${totalFixed} formatting changes were applied using the APA 7 Student Paper template.`
-              : "No additional automatic formatting changes were required."}
-          </p>
-
-          {visibleFixedCounts.length > 0 && (
-            <div className="fixedSummary">
-              <h3>Changes applied</h3>
-
-              <ul>
-                {visibleFixedCounts.map((item) => (
-                  <li key={item.key}>
-                    <span className="checkIcon" aria-hidden="true">
-                      ✓
-                    </span>
-
-                    <span>{item.label}</span>
-
-                    <strong>{item.value}</strong>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className="downloadArea">
-            {downloadUrl && (
-              <a
-                className="downloadButton"
-                href={downloadUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <span aria-hidden="true">↓</span>
-                Download Fixed Document
-              </a>
-            )}
-
-            <button
-              type="button"
-              className="secondaryButton"
-              onClick={resetWorkflow}
-            >
-              Format Another Document
-            </button>
-          </div>
-
-          <p className="reviewNotice">
-            Review the corrected document in Microsoft Word before submitting
-            it.
-          </p>
-
-          {fixResult.fixed_counts && (
-            <details className="technicalDetails">
-              <summary>View technical details</summary>
-
-              <pre>
-                {JSON.stringify(fixResult.fixed_counts, null, 2)}
-              </pre>
-            </details>
-          )}
-        </section>
-      )}
-
-      <footer className="footer">
-        <p>DOC Formatter · APA 7 Student Paper</p>
-      </footer>
-    </main>
+      <HowItWorks />
+    </div>
   );
 }
 
-export default App;
+export default FormatterApp;

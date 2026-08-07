@@ -1,0 +1,68 @@
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-fade-rise {
+  animation: fade-rise 0.8s ease-out both;
+}
+
+.animate-fade-rise-delay {
+  animation: fade-rise 0.8s ease-out 0.15s both;
+}
+
+.animate-fade-rise-delay-2 {
+  animation: fade-rise 0.8s ease-out 0.3s both;
+}
+
+.spinner,
+.largeSpinner {
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.2);
+  border-top-color: hsl(var(--foreground));
+  animation: spin 0.8s linear infinite;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+.largeSpinner {
+  width: 36px;
+  height: 36px;
+  border-width: 2.5px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-rise,
+  .animate-fade-rise-delay,
+  .animate-fade-rise-delay-2 {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .spinner,
+  .largeSpinner {
+    animation: none;
+    border-color: hsl(var(--foreground));
+  }
+}

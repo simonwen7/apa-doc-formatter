@@ -1,0 +1,344 @@
+/* Authentication page */
+
+.authPage {
+  display: grid;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  grid-template-columns: minmax(0, 46%) minmax(0, 54%);
+  overflow: hidden;
+  background: hsl(var(--background));
+}
+
+.authBrandPanel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(40px, 5vw, 72px);
+  overflow: hidden;
+  color: hsl(var(--foreground));
+}
+
+.authBrandVideo,
+.authBrandStatic {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.authBrandVideo {
+  object-fit: cover;
+}
+
+.authBrandStatic {
+  background: hsl(var(--background));
+}
+
+.authBrandOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 25, 36, 0.55);
+}
+
+.authBrandContent {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 480px;
+}
+
+.authLogo {
+  display: inline-flex;
+  align-items: baseline;
+  margin-bottom: 28px;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  letter-spacing: -0.03em;
+}
+
+.authLogo mark {
+  all: unset;
+  font-size: 0.55em;
+  vertical-align: super;
+}
+
+.authBrandContent h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(2.6rem, 4vw, 3.8rem);
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+}
+
+.authBrandContent > p {
+  margin: 22px 0 0;
+  max-width: 36ch;
+  color: hsl(var(--muted-foreground));
+  font-size: 1.05rem;
+  line-height: 1.65;
+}
+
+.authBenefits {
+  display: grid;
+  gap: 12px;
+  margin: 36px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.authBenefits li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.9375rem;
+}
+
+.authBenefits li span {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: hsl(var(--success));
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.authFormPanel {
+  display: grid;
+  place-items: center;
+  padding: clamp(28px, 4vw, 48px);
+  background: hsl(var(--background-secondary));
+}
+
+.authCard {
+  width: 100%;
+  max-width: 440px;
+}
+
+.mobileAuthLogo {
+  display: none;
+  margin-bottom: 18px;
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+}
+
+.authHeading h2 {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 2.2rem;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+}
+
+.authHeading p {
+  margin: 0 0 28px;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.authTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 28px;
+  padding: 4px;
+  border-radius: 999px;
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border) / 0.7);
+}
+
+.authTabs button {
+  min-height: 40px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: var(--transition);
+}
+
+.authTabs button.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: hsl(var(--foreground));
+}
+
+.authForm {
+  display: grid;
+  gap: 18px;
+}
+
+.authField {
+  display: grid;
+  gap: 8px;
+}
+
+.authField label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.authField input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-sm);
+  background: hsl(var(--input));
+  color: hsl(var(--foreground));
+  outline: none;
+  transition: var(--transition);
+}
+
+.authField input::placeholder {
+  color: hsl(var(--subtle-foreground));
+}
+
+.authField input:focus {
+  border-color: hsl(var(--border-strong));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+
+.authField small {
+  color: hsl(var(--subtle-foreground));
+  font-size: 0.75rem;
+}
+
+.passwordInputWrapper {
+  position: relative;
+}
+
+.passwordInputWrapper input {
+  padding-right: 72px;
+}
+
+.showPasswordButton {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.showPasswordButton:hover {
+  color: hsl(var(--foreground));
+}
+
+.authError,
+.authSuccess {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.authError {
+  background: hsl(var(--destructive) / 0.12);
+  border: 1px solid hsl(var(--destructive) / 0.35);
+}
+
+.authSuccess {
+  background: hsl(var(--success) / 0.1);
+  border: 1px solid hsl(var(--success) / 0.28);
+}
+
+.authError span,
+.authSuccess span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.authError span {
+  background: hsl(var(--destructive) / 0.22);
+  color: hsl(var(--destructive));
+}
+
+.authSuccess span {
+  background: hsl(var(--success) / 0.22);
+  color: hsl(var(--success));
+}
+
+.authError p,
+.authSuccess p {
+  margin: 0;
+}
+
+.authSubmitButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 52px;
+  margin-top: 4px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-size: 0.9375rem;
+  font-weight: 600;
+  transition: var(--transition);
+}
+
+.authSubmitButton:hover:not(:disabled) {
+  transform: scale(1.02);
+}
+
+.authSubmitButton:disabled {
+  opacity: 0.55;
+}
+
+.authSwitchText {
+  margin: 22px 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.authSwitchText button {
+  margin-left: 6px;
+  border: none;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 900px) {
+  .authPage {
+    grid-template-columns: 1fr;
+  }
+
+  .authBrandPanel {
+    display: none;
+  }
+
+  .mobileAuthLogo {
+    display: inline-flex;
+  }
+
+  .authFormPanel {
+    align-items: flex-start;
+    padding-top: 48px;
+  }
+}
