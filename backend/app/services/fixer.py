@@ -1,3 +1,24 @@
+"""
+LEGACY MODULE — NOT USED BY THE PRODUCTION FIX PIPELINE (Phase 2A).
+
+Production analyze/fix routes use `app.apa.engine.*`.
+
+This file is preserved for Git history and gradual migration only.
+Do NOT call `fix_apa_format` from production endpoints.
+
+Dangerous text-mutating helpers in this module include:
+- _normalize_general_text
+- _normalize_reference_text
+- _normalize_paragraph_text_in_place
+- _sentence_case_title
+- _rebuild_journal_reference
+- _set_paragraph_text_single_run / _clear_paragraph
+- _fix_references_heading (forces heading text)
+- _strip_leading_bullet_text
+- _delete_paragraph / cover blank insertion
+"""
+
+import logging
 import re
 from typing import Dict, Optional, List, Set
 
@@ -12,6 +33,11 @@ try:
     from docx.enum.section import WD_ALIGN_VERTICAL
 except Exception:
     WD_ALIGN_VERTICAL = None
+
+logger = logging.getLogger(__name__)
+logger.warning(
+    "legacy fixer module imported; production routes must use app.apa.engine.fixer"
+)
 
 
 APA_FONT_NAME = "Times New Roman"
@@ -792,6 +818,31 @@ def _fix_tables(doc: Document, fixed_counts):
 
 
 def fix_apa_format(input_path: str, output_path: str) -> dict:
+    """
+    LEGACY entry point — disabled for production use.
+
+    Use `app.apa.engine.fixer.fix_document_path` instead.
+    """
+    raise RuntimeError(
+        "legacy fix_apa_format is disabled. "
+        "Use app.apa.engine.fixer.fix_document_path for production formatting."
+    )
+
+
+def fix_apa(input_path: str, output_path: str) -> dict:
+    return fix_apa_format(input_path, output_path)
+
+
+def legacy_fix_apa_format_UNSAFE(input_path: str, output_path: str) -> dict:
+    """
+    Preserved legacy implementation (unsafe text mutation).
+
+    Not registered to any production route. Kept only for migration reference.
+    """
+    return _legacy_fix_apa_format_impl(input_path, output_path)
+
+
+def _legacy_fix_apa_format_impl(input_path: str, output_path: str) -> dict:
     doc = Document(input_path)
 
     fixed_counts = {
@@ -879,7 +930,3 @@ def fix_apa_format(input_path: str, output_path: str) -> dict:
 
     doc.save(output_path)
     return fixed_counts
-
-
-def fix_apa(input_path: str, output_path: str) -> dict:
-    return fix_apa_format(input_path, output_path)

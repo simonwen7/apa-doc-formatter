@@ -1,3 +1,11 @@
+"""
+LEGACY MODULE — NOT USED BY THE PRODUCTION ANALYZE/FIX PIPELINE (Phase 2A).
+
+Production region classification lives in `app.apa.engine.classifier`.
+This course/question heuristic classifier is preserved for Git history only.
+"""
+
+
 def normalize_text(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 

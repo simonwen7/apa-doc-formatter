@@ -1,3 +1,10 @@
+"""
+LEGACY MODULE — NOT USED BY THE PRODUCTION ANALYZE PIPELINE (Phase 2A).
+
+Production analyze routes use `app.apa.engine.analyzer`.
+This module is preserved for Git history / migration reference only.
+"""
+
 import re
 from collections import Counter
 from typing import Dict, Optional
