@@ -19,7 +19,10 @@ FIXED_DIR = RUNTIME_DIR / "fixed"
 
 # Private Vercel Blob is required when fixed files must survive across
 # separate serverless invocations (fix -> download).
+# On Vercel, prefer OIDC (VERCEL_OIDC_TOKEN + BLOB_STORE_ID).
+# BLOB_READ_WRITE_TOKEN remains an optional fallback when explicitly set.
 BLOB_READ_WRITE_TOKEN = os.getenv("BLOB_READ_WRITE_TOKEN")
+BLOB_STORE_ID = os.getenv("BLOB_STORE_ID") or os.getenv("VERCEL_BLOB_STORE_ID")
 USE_BLOB_STORAGE = IS_VERCEL
 
 DOCX_MEDIA_TYPE = (

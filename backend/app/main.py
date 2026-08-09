@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.api.routes_documents import router as documents_router
 
 app = FastAPI(
@@ -17,5 +18,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def register_vercel_request_headers(request: Request, call_next):
+    """
+    Expose incoming Vercel request headers (including x-vercel-oidc-token)
+    to vercel.oidc helpers for on-platform Blob authentication.
+    """
+    try:
+        from vercel.headers import set_headers
+
+        set_headers({key.lower(): value for key, value in request.headers.items()})
+    except Exception:
+        # Local / non-Vercel environments may not have the helper wired; ignore.
+        pass
+
+    return await call_next(request)
+
 
 app.include_router(documents_router)
