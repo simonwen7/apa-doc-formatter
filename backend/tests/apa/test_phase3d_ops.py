@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
@@ -106,102 +107,75 @@ def test_parse_fixed_pathname_rejects_unrelated_and_malformed():
 
 
 def test_blob_list_provider_shape_and_delete(monkeypatch, tmp_path):
-    """Mock Vercel Blob list/delete HTTP shapes used by document_store."""
-    import httpx
+    """Mock official BlobClient list/delete used by document_store cleanup."""
+    from datetime import datetime, timezone
 
     monkeypatch.setattr(document_store, "USE_BLOB_STORAGE", True)
+    monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_storeTEST_fake")
     doc_keep = str(uuid4())
     doc_expire = str(uuid4())
     user_b = "22222222-2222-4222-8222-222222222222"
 
-    list_payload = {
-        "blobs": [
-            {
-                "pathname": f"fixed/{USER_A}/{doc_keep}.docx",
-                "uploadedAt": "2026-08-09T10:00:00.000Z",
-            },
-            {
-                "pathname": f"fixed/{user_b}/{doc_expire}.docx",
-                "uploadedAt": "2026-08-01T10:00:00.000Z",
-            },
-            {
-                "pathname": f"fixed/{user_b}/{doc_expire}.meta.json",
-                "uploadedAt": "2026-08-01T10:00:00.000Z",
-            },
-            {
-                "pathname": "uploads/should-not-touch.docx",
-                "uploadedAt": "2020-01-01T00:00:00.000Z",
-            },
-            {
-                "pathname": "fixed/bad/not-uuid.docx",
-                "uploadedAt": "2020-01-01T00:00:00.000Z",
-            },
-        ],
-        "hasMore": False,
-        "cursor": None,
-    }
+    @dataclass
+    class Item:
+        pathname: str
+        uploaded_at: datetime
+        url: str = ""
+        download_url: str = ""
+        size: int = 1
 
-    deleted: list[str] = []
-
-    class FakeResponse:
-        def __init__(self, status_code=200, payload=None, text=""):
-            self.status_code = status_code
-            self._payload = payload or {}
-            self.text = text or json.dumps(self._payload)
-
-        def json(self):
-            return self._payload
+    @dataclass
+    class Page:
+        blobs: list
+        cursor: str | None = None
+        has_more: bool = False
+        folders: list | None = None
 
     class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
+        def __init__(self):
+            self.deletes: list[str] = []
 
-        def __enter__(self):
-            return self
+        def list_objects(self, *, prefix=None, cursor=None, limit=None, **kwargs):
+            blobs = [
+                Item(
+                    pathname=f"fixed/{USER_A}/{doc_keep}.docx",
+                    uploaded_at=datetime(2026, 8, 9, tzinfo=timezone.utc),
+                ),
+                Item(
+                    pathname=f"fixed/{user_b}/{doc_expire}.docx",
+                    uploaded_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                ),
+                Item(
+                    pathname=f"fixed/{user_b}/{doc_expire}.meta.json",
+                    uploaded_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                ),
+                Item(
+                    pathname="uploads/should-not-touch.docx",
+                    uploaded_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+                ),
+                Item(
+                    pathname="fixed/bad/not-uuid.docx",
+                    uploaded_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+                ),
+            ]
+            return Page(blobs=blobs)
 
-        def __exit__(self, *args):
-            return False
+        def get(self, pathname, *, access="public", **kwargs):
+            class R:
+                content = json.dumps(
+                    {"created_at": 1.0, "document_id": doc_expire}
+                ).encode("utf-8")
 
-        def get(self, url, headers=None, params=None):
-            if params and params.get("prefix") == "fixed/":
-                return FakeResponse(200, list_payload)
-            # meta get
-            return FakeResponse(
-                200,
-                text=json.dumps({"created_at": 1.0, "document_id": doc_expire}),
-            )
+            return R()
 
-        def post(self, url, headers=None, json=None):
-            if url.endswith("/delete"):
-                for item in (json or {}).get("urls") or []:
-                    deleted.append(item)
-                return FakeResponse(200, {"ok": True})
-            return FakeResponse(400, text="bad")
-
-        def delete(self, url, headers=None, params=None):
-            return FakeResponse(200, {"ok": True})
+        def delete(self, pathname, **kwargs):
+            self.deletes.append(pathname)
 
         def put(self, *args, **kwargs):
-            return FakeResponse(200, {"ok": True})
+            return None
 
-    monkeypatch.setattr(httpx, "Client", FakeClient)
-    monkeypatch.setattr(
-        document_store,
-        "_resolve_blob_auth",
-        lambda **_kwargs: document_store._BlobAuth(
-            token="token", store_id="store123", mode="rw_token"
-        ),
-    )
-
-    # Intercept meta content reads used during enrichment.
-    def fake_get(pathname, auth):
-        if pathname.endswith(".meta.json"):
-            return json.dumps(
-                {"created_at": 1.0, "document_id": doc_expire}
-            ).encode("utf-8")
-        raise FileNotFoundError(pathname)
-
-    monkeypatch.setattr(document_store, "_get_private_blob", fake_get)
+    fake = FakeClient()
+    monkeypatch.setattr(document_store, "_blob_client", lambda: fake)
 
     objects = document_store._list_fixed_from_blob()
     pathnames = {o.pathname for o in objects}
@@ -209,7 +183,6 @@ def test_blob_list_provider_shape_and_delete(monkeypatch, tmp_path):
     assert any(doc_expire in p for p in pathnames)
     assert not any(p.startswith("uploads/") for p in pathnames)
 
-    # Age one object and run cleanup using returned objects.
     import time
 
     now = time.time()
@@ -236,12 +209,11 @@ def test_blob_list_provider_shape_and_delete(monkeypatch, tmp_path):
 
     deleted_ids: list[str] = []
 
-    def fake_delete(user_id, document_id, *, oidc_token=None):
+    def fake_delete(user_id, document_id):
         deleted_ids.append(document_id)
         return True
 
     monkeypatch.setattr(document_store, "delete_fixed_document", fake_delete)
-    # retention_cleanup imports delete_fixed_document at module level — patch there too
     import app.services.retention_cleanup as cleanup_mod
 
     monkeypatch.setattr(cleanup_mod, "delete_fixed_document", fake_delete)
@@ -255,47 +227,21 @@ def test_blob_list_provider_shape_and_delete(monkeypatch, tmp_path):
 
 
 def test_blob_list_provider_error_is_safe(monkeypatch):
-    import httpx
-
     monkeypatch.setattr(document_store, "USE_BLOB_STORAGE", True)
+    monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_storeTEST_fake")
 
     class BoomClient:
-        def __init__(self, *args, **kwargs):
-            pass
+        def list_objects(self, **kwargs):
+            raise RuntimeError("provider")
 
-        def __enter__(self):
-            return self
+    monkeypatch.setattr(document_store, "_blob_client", lambda: BoomClient())
 
-        def __exit__(self, *args):
-            return False
-
-        def get(self, *args, **kwargs):
-            class R:
-                status_code = 500
-                text = "provider failure"
-
-                def json(self):
-                    return {}
-
-            return R()
-
-    monkeypatch.setattr(httpx, "Client", BoomClient)
-    monkeypatch.setattr(
-        document_store,
-        "_resolve_blob_auth",
-        lambda **_kwargs: document_store._BlobAuth(
-            token="token", store_id="store123", mode="rw_token"
-        ),
-    )
-
-    with pytest.raises(RuntimeError):
+    with pytest.raises(document_store.BlobStorageError):
         document_store._list_fixed_from_blob()
 
-    # list failure should not crash batch with uncaught exception when using
-    # cleanup's try/except — monkeypatch list to raise
     import app.services.retention_cleanup as cleanup_mod
 
-    def boom_list(**_kwargs):
+    def boom_list():
         raise RuntimeError("provider")
 
     monkeypatch.setattr(cleanup_mod, "list_fixed_objects", boom_list)

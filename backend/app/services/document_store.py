@@ -5,6 +5,10 @@ Storage key model (Phase 3C):
 
 Ownership is inherent in the pathname. Download for user A never scans user B's
 folder. Local and Blob modes share the same logical pathname.
+
+On Vercel, persistence uses the official Python `vercel.blob.BlobClient` with
+`BLOB_READ_WRITE_TOKEN` (or `VERCEL_BLOB_READ_WRITE_TOKEN`). Private access is
+required for every put/get. Blob URLs are never returned to the client.
 """
 
 from __future__ import annotations
@@ -13,11 +17,10 @@ import json
 import logging
 import os
 import time
-import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from urllib.parse import quote
+from typing import Any, Optional
 
 from fastapi import HTTPException
 
@@ -33,15 +36,12 @@ from app.services.download_auth import validate_document_id, validate_user_id
 
 logger = logging.getLogger(__name__)
 
-BLOB_API_URL = os.getenv("VERCEL_BLOB_API_URL") or "https://vercel.com/api/blob"
-BLOB_API_VERSION = os.getenv("VERCEL_BLOB_API_VERSION_OVERRIDE") or "11"
-
-
-@dataclass(frozen=True)
-class _BlobAuth:
-    token: str
-    store_id: str
-    mode: str  # "oidc" | "rw_token"
+# Internal diagnostic categories (never include secrets).
+BLOB_AUTH_FAILED = "BLOB_AUTH_FAILED"
+BLOB_WRITE_FAILED = "BLOB_WRITE_FAILED"
+BLOB_READ_FAILED = "BLOB_READ_FAILED"
+BLOB_LIST_FAILED = "BLOB_LIST_FAILED"
+BLOB_DELETE_FAILED = "BLOB_DELETE_FAILED"
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,15 @@ class StoredFixedObject:
     user_id: str
     document_id: str
     created_at: float
+
+
+class BlobStorageError(RuntimeError):
+    """Provider failure with a safe internal category (no credentials)."""
+
+    def __init__(self, category: str, *, cause: Exception | None = None):
+        self.category = category
+        super().__init__(category)
+        self.__cause__ = cause
 
 
 def fixed_pathname(user_id: str, document_id: str) -> str:
@@ -97,19 +106,11 @@ def _write_local_meta(user_id: str, document_id: str, created_at: float) -> None
     )
 
 
-def save_fixed_document(
-    user_id: str,
-    document_id: str,
-    source_path: Path,
-    *,
-    oidc_token: str | None = None,
-) -> str:
+def save_fixed_document(user_id: str, document_id: str, source_path: Path) -> str:
     """
     Persist a fixed DOCX under the verified owner's namespace.
 
     Returns the logical pathname (never a host filesystem path or Blob URL).
-    `oidc_token` is Vercel infrastructure auth from `x-vercel-oidc-token`
-    (never the Supabase user Bearer).
     """
     if not source_path.exists():
         raise HTTPException(
@@ -121,13 +122,7 @@ def save_fixed_document(
     created_at = time.time()
 
     if USE_BLOB_STORAGE:
-        return _save_fixed_to_blob(
-            user_id,
-            document_id,
-            source_path,
-            created_at,
-            oidc_token=oidc_token,
-        )
+        return _save_fixed_to_blob(user_id, document_id, source_path, created_at)
 
     FIXED_DIR.mkdir(parents=True, exist_ok=True)
     destination = temp_fixed_path(user_id, document_id)
@@ -137,19 +132,14 @@ def save_fixed_document(
     return pathname
 
 
-def load_fixed_document(
-    user_id: str,
-    document_id: str,
-    *,
-    oidc_token: str | None = None,
-) -> tuple[bytes, str]:
+def load_fixed_document(user_id: str, document_id: str) -> tuple[bytes, str]:
     """
     Load a previously persisted fixed DOCX for the verified owner only.
 
     Missing or cross-user lookups return the same 404.
     """
     if USE_BLOB_STORAGE:
-        return _load_fixed_from_blob(user_id, document_id, oidc_token=oidc_token)
+        return _load_fixed_from_blob(user_id, document_id)
 
     path = temp_fixed_path(user_id, document_id)
     if not path.exists():
@@ -157,24 +147,19 @@ def load_fixed_document(
     return path.read_bytes(), fixed_filename(document_id)
 
 
-def delete_fixed_document(
-    user_id: str,
-    document_id: str,
-    *,
-    oidc_token: str | None = None,
-) -> bool:
+def delete_fixed_document(user_id: str, document_id: str) -> bool:
     """Delete one owner-scoped fixed document. Returns True if deleted/missing OK."""
     pathname = fixed_pathname(user_id, document_id)
     meta_pathname = fixed_meta_pathname(user_id, document_id)
 
     if USE_BLOB_STORAGE:
         try:
-            auth = _resolve_blob_auth(oidc_token=oidc_token)
-            _delete_private_blob(pathname, auth)
-            _delete_private_blob(meta_pathname, auth)
+            client = _blob_client()
+            _sdk_delete(client, pathname)
+            _sdk_delete(client, meta_pathname)
             return True
         except Exception as exc:
-            _log_blob_failure("delete", exc)
+            _log_blob_failure("delete", BLOB_DELETE_FAILED, exc)
             return False
 
     path = temp_fixed_path(user_id, document_id)
@@ -189,10 +174,10 @@ def delete_fixed_document(
     return deleted
 
 
-def list_fixed_objects(*, oidc_token: str | None = None) -> list[StoredFixedObject]:
+def list_fixed_objects() -> list[StoredFixedObject]:
     """List fixed documents under the approved namespace only."""
     if USE_BLOB_STORAGE:
-        return _list_fixed_from_blob(oidc_token=oidc_token)
+        return _list_fixed_from_blob()
     return _list_fixed_from_local()
 
 
@@ -234,220 +219,142 @@ def _list_fixed_from_local() -> list[StoredFixedObject]:
     return results
 
 
-def _normalize_store_id(store_id: str) -> str:
-    value = store_id.strip()
-    if value.startswith("store_"):
-        return value[len("store_") :]
-    return value
-
-
 def _resolve_rw_token() -> Optional[str]:
-    return os.getenv("BLOB_READ_WRITE_TOKEN") or os.getenv(
-        "VERCEL_BLOB_READ_WRITE_TOKEN"
+    """Server-only Blob credential. Never read Supabase Authorization."""
+    token = (
+        os.getenv("BLOB_READ_WRITE_TOKEN")
+        or os.getenv("VERCEL_BLOB_READ_WRITE_TOKEN")
+        or ""
+    ).strip()
+    return token or None
+
+
+def require_blob_rw_token() -> str:
+    """Fail closed when Blob storage is required but the RW token is missing."""
+    token = _resolve_rw_token()
+    if not token:
+        raise BlobStorageError(BLOB_AUTH_FAILED)
+    return token
+
+
+def _blob_client() -> Any:
+    """
+    Construct the official BlobClient.
+
+    Token is resolved by the SDK from BLOB_READ_WRITE_TOKEN /
+    VERCEL_BLOB_READ_WRITE_TOKEN when not passed explicitly. We still verify
+    presence first so missing production config fails with BLOB_AUTH_FAILED.
+    """
+    require_blob_rw_token()
+    try:
+        from vercel.blob import BlobClient
+    except ImportError as exc:
+        raise BlobStorageError(BLOB_AUTH_FAILED, cause=exc) from exc
+
+    return BlobClient()
+
+
+def _classify_blob_exception(exc: Exception, *, default: str) -> str:
+    name = type(exc).__name__
+    message = str(exc).lower()
+    if name in {"BlobNoTokenProvidedError", "BlobAccessError"} or "token" in message:
+        return BLOB_AUTH_FAILED
+    if name in {"BlobStoreNotFoundError"}:
+        return BLOB_AUTH_FAILED
+    if name in {"BlobNotFoundError"}:
+        return BLOB_READ_FAILED
+    return default
+
+
+def _log_blob_failure(operation: str, category: str, exc: Exception) -> None:
+    # Never log token values or exception messages (may echo provider bodies).
+    logger.error(
+        "Vercel Blob %s failed category=%s type=%s",
+        operation,
+        category,
+        type(exc).__name__,
     )
 
 
-def _resolve_store_id() -> Optional[str]:
-    raw = os.getenv("BLOB_STORE_ID") or os.getenv("VERCEL_BLOB_STORE_ID")
-    if not raw:
-        return None
-    return _normalize_store_id(raw)
+def _sdk_put(
+    client: Any,
+    pathname: str,
+    body: bytes,
+    *,
+    content_type: str,
+) -> None:
+    client.put(
+        pathname,
+        body,
+        access="private",
+        content_type=content_type,
+        add_random_suffix=False,
+        overwrite=True,
+    )
 
 
-def _resolve_oidc_token(*, oidc_token: str | None = None) -> str:
-    """
-    Resolve Vercel infrastructure OIDC for Blob.
-
-    Preference (official Function runtime model):
-    1. Explicit token from the current request's `x-vercel-oidc-token`
-    2. vercel.oidc helper (ContextVar headers, then env for builds/CLI)
-    3. VERCEL_OIDC_TOKEN env (builds / vercel env pull) as last resort
-
-    Never read the Supabase `Authorization` Bearer here.
-    """
-    explicit = (oidc_token or "").strip()
-    if explicit:
-        return explicit
+def _sdk_get_bytes(client: Any, pathname: str) -> bytes:
+    from vercel.blob.errors import BlobNotFoundError
 
     try:
-        from vercel.oidc import get_vercel_oidc_token_sync
+        result = client.get(pathname, access="private")
+    except BlobNotFoundError as exc:
+        raise FileNotFoundError(pathname) from exc
+    content = getattr(result, "content", None)
+    if content is None:
+        raise FileNotFoundError(pathname)
+    return bytes(content)
 
-        return get_vercel_oidc_token_sync()
+
+def _sdk_delete(client: Any, pathname: str) -> None:
+    from vercel.blob.errors import BlobNotFoundError
+
+    try:
+        client.delete(pathname)
+    except BlobNotFoundError:
+        return
+
+
+def _uploaded_at_to_epoch(value: Any, fallback: float) -> float:
+    if value is None:
+        return fallback
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, datetime):
+        return value.timestamp()
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
     except Exception:
-        env_token = (os.getenv("VERCEL_OIDC_TOKEN") or "").strip()
-        if env_token:
-            return env_token
-        raise RuntimeError(
-            "Vercel OIDC token unavailable for Blob. "
-            "Ensure the Function request includes x-vercel-oidc-token "
-            "and OIDC is enabled for the project."
-        ) from None
+        return fallback
 
 
-def _extract_store_id_from_rw_token(token: str) -> Optional[str]:
-    parts = token.split("_")
-    if len(parts) > 3 and parts[0] == "vercel" and parts[1] == "blob":
-        return parts[3] or None
-    return None
+def _list_fixed_from_blob() -> list[StoredFixedObject]:
+    try:
+        client = _blob_client()
+    except BlobStorageError:
+        raise
+    except Exception as exc:
+        category = _classify_blob_exception(exc, default=BLOB_LIST_FAILED)
+        _log_blob_failure("list", category, exc)
+        raise BlobStorageError(category, cause=exc) from exc
 
-
-def _resolve_blob_auth(*, oidc_token: str | None = None) -> _BlobAuth:
-    rw_token = _resolve_rw_token()
-    if rw_token:
-        store_id = _extract_store_id_from_rw_token(rw_token) or _resolve_store_id()
-        if not store_id:
-            raise RuntimeError(
-                "BLOB_READ_WRITE_TOKEN is set but store id could not be determined. "
-                "Set BLOB_STORE_ID as well."
-            )
-        return _BlobAuth(token=rw_token, store_id=store_id, mode="rw_token")
-
-    store_id = _resolve_store_id()
-    if not store_id:
-        raise RuntimeError(
-            "Private Vercel Blob requires BLOB_STORE_ID when using OIDC. "
-            "Connect the Blob store to this project or set BLOB_STORE_ID."
-        )
-
-    resolved = _resolve_oidc_token(oidc_token=oidc_token)
-    return _BlobAuth(token=resolved, store_id=store_id, mode="oidc")
-
-
-def _blob_request_id(store_id: str) -> str:
-    return f"{store_id}:{int(time.time() * 1000)}:{uuid.uuid4().hex[:8]}"
-
-
-def _put_private_blob(pathname: str, content: bytes, auth: _BlobAuth) -> None:
-    import httpx
-
-    headers = {
-        "authorization": f"Bearer {auth.token}",
-        "x-api-version": str(BLOB_API_VERSION),
-        "x-api-blob-request-id": _blob_request_id(auth.store_id),
-        "x-api-blob-request-attempt": "0",
-        "x-vercel-blob-access": "private",
-        "x-content-type": DOCX_MEDIA_TYPE,
-        "x-add-random-suffix": "0",
-        "x-allow-overwrite": "1",
-    }
-
-    with httpx.Client(timeout=60.0) as client:
-        response = client.put(
-            BLOB_API_URL,
-            params={"pathname": pathname},
-            headers=headers,
-            content=content,
-        )
-
-    if response.status_code >= 400:
-        raise RuntimeError(
-            f"Blob put failed with status {response.status_code}: "
-            f"{_safe_response_snippet(response.text)}"
-        )
-
-
-def _get_private_blob(pathname: str, auth: _BlobAuth) -> bytes:
-    import httpx
-
-    encoded_path = "/".join(quote(part, safe="") for part in pathname.split("/"))
-    url = f"https://{auth.store_id}.private.blob.vercel-storage.com/{encoded_path}"
-    headers = {"authorization": f"Bearer {auth.token}"}
-
-    with httpx.Client(timeout=60.0, follow_redirects=True) as client:
-        response = client.get(url, headers=headers)
-
-    if response.status_code == 404:
-        raise FileNotFoundError(f"Blob not found at pathname '{pathname}'.")
-
-    if response.status_code >= 400:
-        raise RuntimeError(
-            f"Blob get failed with status {response.status_code}: "
-            f"{_safe_response_snippet(response.text)}"
-        )
-
-    return response.content
-
-
-def _delete_private_blob(pathname: str, auth: _BlobAuth) -> None:
-    """Delete by pathname. Missing objects are treated as success."""
-    import httpx
-
-    # Official Blob del accepts URL or pathname. Prefer private URL form.
-    encoded_path = "/".join(quote(part, safe="") for part in pathname.split("/"))
-    url = f"https://{auth.store_id}.private.blob.vercel-storage.com/{encoded_path}"
-    headers = {
-        "authorization": f"Bearer {auth.token}",
-        "x-api-version": str(BLOB_API_VERSION),
-        "x-api-blob-request-id": _blob_request_id(auth.store_id),
-    }
-
-    with httpx.Client(timeout=60.0) as client:
-        response = client.post(
-            f"{BLOB_API_URL}/delete",
-            headers=headers,
-            json={"urls": [url]},
-        )
-        # Some API versions use DELETE with body; tolerate 404 / already gone.
-        if response.status_code >= 400 and response.status_code != 404:
-            # Try alternate delete shape with pathname.
-            response = client.delete(
-                BLOB_API_URL,
-                headers=headers,
-                params={"pathname": pathname},
-            )
-            if response.status_code >= 400 and response.status_code != 404:
-                raise RuntimeError(
-                    f"Blob delete failed with status {response.status_code}: "
-                    f"{_safe_response_snippet(response.text)}"
-                )
-
-
-def _list_fixed_from_blob(*, oidc_token: str | None = None) -> list[StoredFixedObject]:
-    import httpx
-
-    auth = _resolve_blob_auth(oidc_token=oidc_token)
-    headers = {
-        "authorization": f"Bearer {auth.token}",
-        "x-api-version": str(BLOB_API_VERSION),
-        "x-api-blob-request-id": _blob_request_id(auth.store_id),
-    }
     results: list[StoredFixedObject] = []
-    cursor = None
+    cursor: str | None = None
 
-    with httpx.Client(timeout=60.0) as client:
+    try:
         while True:
-            params: dict[str, str] = {"prefix": FIXED_BLOB_NAMESPACE, "limit": "1000"}
-            if cursor:
-                params["cursor"] = cursor
-            response = client.get(BLOB_API_URL, headers=headers, params=params)
-            if response.status_code >= 400:
-                raise RuntimeError(
-                    f"Blob list failed with status {response.status_code}: "
-                    f"{_safe_response_snippet(response.text)}"
-                )
-            payload = response.json()
-            blobs = payload.get("blobs") or payload.get("data") or []
+            page = client.list_objects(prefix=FIXED_BLOB_NAMESPACE, cursor=cursor, limit=1000)
+            blobs = getattr(page, "blobs", None) or []
             for item in blobs:
-                pathname = item.get("pathname") or item.get("path") or ""
+                pathname = getattr(item, "pathname", "") or ""
                 parsed = _parse_fixed_pathname(pathname)
                 if not parsed:
                     continue
                 user_id, document_id = parsed
-                uploaded = item.get("uploadedAt") or item.get("uploaded_at")
-                created_at = time.time()
-                if uploaded:
-                    try:
-                        # ISO8601 or epoch
-                        if isinstance(uploaded, (int, float)):
-                            created_at = float(uploaded)
-                        else:
-                            from datetime import datetime
-
-                            created_at = datetime.fromisoformat(
-                                str(uploaded).replace("Z", "+00:00")
-                            ).timestamp()
-                    except Exception:
-                        created_at = time.time()
+                created_at = _uploaded_at_to_epoch(
+                    getattr(item, "uploaded_at", None),
+                    time.time(),
+                )
                 results.append(
                     StoredFixedObject(
                         pathname=pathname,
@@ -456,27 +363,29 @@ def _list_fixed_from_blob(*, oidc_token: str | None = None) -> list[StoredFixedO
                         created_at=created_at,
                     )
                 )
-            cursor = payload.get("cursor")
-            if not payload.get("hasMore") and not payload.get("has_more"):
+            has_more = bool(getattr(page, "has_more", False))
+            cursor = getattr(page, "cursor", None)
+            if not has_more or not cursor:
                 break
-            if not cursor:
-                break
+    except BlobStorageError:
+        raise
+    except Exception as exc:
+        category = _classify_blob_exception(exc, default=BLOB_LIST_FAILED)
+        _log_blob_failure("list", category, exc)
+        raise BlobStorageError(category, cause=exc) from exc
 
-    # Prefer meta created_at when present.
     meta_by_doc = {
         (o.user_id, o.document_id): o
         for o in results
         if o.pathname.endswith(".meta.json")
     }
-    # Filter to .docx only for cleanup candidates.
     docs = [o for o in results if o.pathname.endswith(".docx")]
     enriched: list[StoredFixedObject] = []
     for obj in docs:
         meta = meta_by_doc.get((obj.user_id, obj.document_id))
         if meta:
-            # Load meta content when possible for precise age.
             try:
-                raw = _get_private_blob(meta.pathname, auth)
+                raw = _sdk_get_bytes(client, meta.pathname)
                 payload = json.loads(raw.decode("utf-8"))
                 created_at = float(payload.get("created_at", obj.created_at))
                 enriched.append(
@@ -513,99 +422,70 @@ def _parse_fixed_pathname(pathname: str) -> tuple[str, str] | None:
     return user_id, document_id
 
 
-def _safe_response_snippet(text: str, limit: int = 240) -> str:
-    cleaned = " ".join((text or "").split())
-    if len(cleaned) > limit:
-        return cleaned[:limit] + "…"
-    return cleaned
-
-
-def _log_blob_failure(operation: str, exc: Exception) -> None:
-    # Never log token values or exception messages (may echo provider bodies).
-    logger.error(
-        "Vercel Blob %s failed (%s)",
-        operation,
-        type(exc).__name__,
-    )
-
-
 def _save_fixed_to_blob(
     user_id: str,
     document_id: str,
     source_path: Path,
     created_at: float,
-    *,
-    oidc_token: str | None = None,
 ) -> str:
     pathname = fixed_pathname(user_id, document_id)
     meta_pathname = fixed_meta_pathname(user_id, document_id)
 
     try:
-        auth = _resolve_blob_auth(oidc_token=oidc_token)
-        _put_private_blob(pathname, source_path.read_bytes(), auth)
+        client = _blob_client()
+        _sdk_put(
+            client,
+            pathname,
+            source_path.read_bytes(),
+            content_type=DOCX_MEDIA_TYPE,
+        )
         meta_bytes = json.dumps(
             {"created_at": created_at, "document_id": document_id}
         ).encode("utf-8")
-        import httpx
-
-        headers = {
-            "authorization": f"Bearer {auth.token}",
-            "x-api-version": str(BLOB_API_VERSION),
-            "x-api-blob-request-id": _blob_request_id(auth.store_id),
-            "x-api-blob-request-attempt": "0",
-            "x-vercel-blob-access": "private",
-            "x-content-type": "application/json",
-            "x-add-random-suffix": "0",
-            "x-allow-overwrite": "1",
-        }
-        with httpx.Client(timeout=60.0) as client:
-            response = client.put(
-                BLOB_API_URL,
-                params={"pathname": meta_pathname},
-                headers=headers,
-                content=meta_bytes,
-            )
-        if response.status_code >= 400:
-            raise RuntimeError(
-                f"Blob meta put failed with status {response.status_code}: "
-                f"{_safe_response_snippet(response.text)}"
-            )
-    except Exception as exc:
-        _log_blob_failure("put", exc)
+        _sdk_put(
+            client,
+            meta_pathname,
+            meta_bytes,
+            content_type="application/json",
+        )
+    except BlobStorageError as exc:
+        _log_blob_failure("put", exc.category, exc)
         raise HTTPException(
             status_code=503,
             detail=(
                 "Unable to store the fixed document in private Vercel Blob. "
-                "Ensure the private Blob store is connected and OIDC is enabled "
-                f"({type(exc).__name__})."
+                "Ensure BLOB_READ_WRITE_TOKEN is configured for this deployment."
             ),
-        ) from exc
+        ) from None
+    except Exception as exc:
+        category = _classify_blob_exception(exc, default=BLOB_WRITE_FAILED)
+        _log_blob_failure("put", category, exc)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Unable to store the fixed document in private Vercel Blob. "
+                "Ensure BLOB_READ_WRITE_TOKEN is configured for this deployment."
+            ),
+        ) from None
 
     return pathname
 
 
-def _load_fixed_from_blob(
-    user_id: str,
-    document_id: str,
-    *,
-    oidc_token: str | None = None,
-) -> tuple[bytes, str]:
+def _load_fixed_from_blob(user_id: str, document_id: str) -> tuple[bytes, str]:
     pathname = fixed_pathname(user_id, document_id)
 
     try:
-        auth = _resolve_blob_auth(oidc_token=oidc_token)
-        content = _get_private_blob(pathname, auth)
+        client = _blob_client()
+        content = _sdk_get_bytes(client, pathname)
     except FileNotFoundError as exc:
-        _log_blob_failure("get", exc)
-        raise HTTPException(status_code=404, detail="Fixed document not found.") from exc
+        _log_blob_failure("get", BLOB_READ_FAILED, exc)
+        raise HTTPException(status_code=404, detail="Fixed document not found.") from None
+    except BlobStorageError as exc:
+        _log_blob_failure("get", exc.category, exc)
+        raise HTTPException(status_code=404, detail="Fixed document not found.") from None
     except Exception as exc:
-        _log_blob_failure("get", exc)
-        raise HTTPException(
-            status_code=404,
-            detail="Fixed document not found.",
-        ) from exc
-
-    if content is None:
-        raise HTTPException(status_code=404, detail="Fixed document not found.")
+        category = _classify_blob_exception(exc, default=BLOB_READ_FAILED)
+        _log_blob_failure("get", category, exc)
+        raise HTTPException(status_code=404, detail="Fixed document not found.") from None
 
     return content, fixed_filename(document_id)

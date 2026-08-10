@@ -65,13 +65,14 @@ Blob variables are not required locally (`USE_BLOB_STORAGE` is false unless `VER
 | `CRON_SECRET` | Yes if cron enabled | Yes | ≥16 random chars (official Vercel Cron auth) |
 | `CLEANUP_JOB_SECRET` | Optional | Yes | Manual cleanup header; may equal `CRON_SECRET` |
 | `CORS_ALLOWED_ORIGINS` | Yes | No | Comma-separated absolute origins including Preview URL(s) |
-| `BLOB_STORE_ID` or `VERCEL_BLOB_STORE_ID` | Yes | No | Private Blob store id |
-| `BLOB_READ_WRITE_TOKEN` | Optional | Yes | Prefer OIDC on Vercel |
+| `BLOB_STORE_ID` or `VERCEL_BLOB_STORE_ID` | Optional | No | Store id (also encoded in RW token) |
+| `BLOB_READ_WRITE_TOKEN` (or `VERCEL_BLOB_READ_WRITE_TOKEN`) | **Required** on Vercel | Yes | Official Python Blob SDK credential. Never use `VITE_` |
 | `DOCUMENT_DOWNLOAD_TOKEN_TTL_SECONDS` | Optional | No | Default 3600 |
 | `DOCUMENT_RETENTION_HOURS` | Optional | No | Default 24 |
 | `VERCEL` | Injected | — | Platform sets `1` |
-| `VERCEL_OIDC_TOKEN` | Builds / `vercel env pull` | — | Not the primary Function-runtime source |
-| Function header `x-vercel-oidc-token` | Injected on each Function request when OIDC is enabled | — | Used for Private Blob put/get/delete |
+
+Python `vercel==0.9.0` Blob SDK does **not** authenticate Blob CRUD with project OIDC.
+Configure `BLOB_READ_WRITE_TOKEN` for Production and Preview Function environments.
 
 `vercel.json` declares a once-daily cron (Hobby-compatible): `0 5 * * *` (05:00 UTC)
 → `GET /internal/cleanup-fixed-documents`.
@@ -85,7 +86,8 @@ Same as Preview, with:
 - Production frontend origin in `CORS_ALLOWED_ORIGINS` (never `*`)
 - `DOCUMENT_DOWNLOAD_SECRET` **required** (≥32)
 - `CRON_SECRET` **required** for scheduled cleanup
-- Private Blob store connected; OIDC preferred
+- Private Blob store connected
+- `BLOB_READ_WRITE_TOKEN` **required** for Python Blob put/get/list/delete (`vercel==0.9.0`)
 - Confirm rewrite `/internal/(.*)` → backend (already in `vercel.json`)
 
 ### Cleanup architecture

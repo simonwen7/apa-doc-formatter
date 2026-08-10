@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
 from app.api.auth_deps import AuthenticatedUser
@@ -21,7 +21,6 @@ from app.services.download_auth import (
     verify_download_token,
 )
 from app.services.parser import parse_docx
-from app.services.vercel_oidc import extract_vercel_oidc_token
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -85,7 +84,6 @@ async def analyze_document(
 
 @router.post("/fix")
 async def fix_document(
-    request: Request,
     file: UploadFile = File(...),
     template_id: str = Form(...),
     current_user: AuthenticatedUser = Depends(require_authenticated_user),
@@ -113,7 +111,6 @@ async def fix_document(
         current_user.user_id,
         document_id,
         output_path,
-        oidc_token=extract_vercel_oidc_token(request),
     )
 
     analysis_after = analyze_document_path(str(output_path), template_id=template_id)
@@ -164,7 +161,6 @@ async def fix_document(
 
 @router.get("/download/{document_id}")
 async def download_fixed_document(
-    request: Request,
     document_id: str,
     token: str | None = Query(default=None),
     current_user: AuthenticatedUser = Depends(require_authenticated_user),
@@ -181,11 +177,7 @@ async def download_fixed_document(
         document_id=document_id,
         token=token,
     )
-    content, filename = load_fixed_document(
-        current_user.user_id,
-        document_id,
-        oidc_token=extract_vercel_oidc_token(request),
-    )
+    content, filename = load_fixed_document(current_user.user_id, document_id)
 
     return Response(
         content=content,

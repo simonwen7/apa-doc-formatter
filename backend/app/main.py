@@ -30,8 +30,10 @@ app.add_middleware(
 @app.middleware("http")
 async def register_vercel_request_headers(request: Request, call_next):
     """
-    Expose incoming Vercel request headers (including x-vercel-oidc-token)
-    to vercel.oidc helpers for on-platform Blob authentication.
+    Register request headers for vercel platform helpers (non-Blob).
+
+    Private Blob CRUD uses BLOB_READ_WRITE_TOKEN via vercel.blob.BlobClient,
+    not request-scoped OIDC.
     """
     try:
         from vercel.headers import set_headers
