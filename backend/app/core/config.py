@@ -8,6 +8,21 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+# backend/app -> backend/
+_BACKEND_ROOT = BASE_DIR.parent
+_ENV_FILE = _BACKEND_ROOT / ".env"
+
+# Load local backend/.env for development without exporting secrets into the shell.
+# Does not override already-set process environment (Vercel/prod inject wins).
+try:
+    from dotenv import load_dotenv
+
+    if _ENV_FILE.is_file():
+        load_dotenv(_ENV_FILE, override=False)
+except ImportError:
+    # Production may omit python-dotenv if platform injects env vars.
+    pass
+
 TEMPLATES_DIR = BASE_DIR / "templates"
 
 # Vercel sets VERCEL=1 in production/preview function runtimes.
