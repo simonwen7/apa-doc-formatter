@@ -29,67 +29,20 @@ def _ensure_lists(context: RuleContext):
 
 
 def _detect_list_indent_policy(context: RuleContext) -> list[Issue]:
-    """Formatting-only list indentation is left UNSUPPORTED when numbering XML risk exists."""
-    lists = _ensure_lists(context)
-    word_lists = [i for i in lists if i.list_type in {"NUMBERED_LIST", "BULLETED_LIST"}]
-    if not word_lists:
-        return []
-    return [
-        Issue(
-            rule_id="APA7-LIST-INDENT",
-            category="Lists",
-            message=(
-                "Word list indentation/numbering is preserved without automatic rewrite. "
-                "List item indentation changes that risk numbering XML corruption are unsupported."
-            ),
-            expected="preserve Word numbering objects",
-            actual="no automatic list indentation rewrite",
-            location="lists",
-            severity=Severity.INFO,
-            fixability=Fixability.UNSUPPORTED,
-            can_fix=False,
-            confidence=1.0,
-            source=SOURCE_LISTS,
-            reason_not_fixable="Safe numbering XML manipulation not guaranteed in python-docx",
-            region=Region.LIST_ITEM,
-        )
-    ]
+    """Registry policy only — do not emit per-document issues."""
+    _ensure_lists(context)
+    return []
 
 
 def _detect_plain_prose_not_list(context: RuleContext) -> list[Issue]:
-    # Policy/info: ensure we do not mis-fix plain "1." prose as lists — no issue spam.
-    # Detector exists for coverage; emits nothing unless explicitly needed.
     _ensure_lists(context)
     return []
 
 
 def _detect_list_text_policy(context: RuleContext) -> list[Issue]:
-    lists = [
-        i
-        for i in _ensure_lists(context)
-        if i.list_type in {"NUMBERED_LIST", "BULLETED_LIST", "UNKNOWN_LIST"}
-    ]
-    if not lists:
-        return []
-    return [
-        Issue(
-            rule_id="APA7-LIST-NO-TEXT-REWRITE",
-            category="Lists",
-            message=(
-                "List item text, bullets, and numbering characters are never rewritten by Fix."
-            ),
-            expected="preserve list text and numbering",
-            actual="policy enforced",
-            location="lists",
-            severity=Severity.INFO,
-            fixability=Fixability.UNSUPPORTED,
-            can_fix=False,
-            confidence=1.0,
-            source=SOURCE_LISTS,
-            reason_not_fixable="Character-level list changes are intentionally unsupported",
-            region=Region.LIST_ITEM,
-        )
-    ]
+    """Registry policy only — do not emit per-document issues."""
+    _ensure_lists(context)
+    return []
 
 
 RULES = [

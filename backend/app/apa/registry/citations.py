@@ -95,13 +95,29 @@ def _detect_missing_locator_on_quote(context: RuleContext) -> list[Issue]:
 
 
 def _detect_et_al_uncertain(context: RuleContext) -> list[Issue]:
-    """Never auto-fix et al.; only uncertain/author notes when incomplete."""
+    """et al. review only when a confident reference match + author count is unavailable."""
+    from app.apa.registry.citation_reference_matching import _ensure_match_data
+    from app.apa.parsing.matching import MatchStatus
+
+    _cites, refs, matches = _ensure_match_data(context)
     issues = []
     for cite in _ensure_citations(context):
         raw = cite.raw_text.lower()
         if "et al" not in raw:
             continue
-        # Without confident reference match + author count, remain uncertain.
+        match = next(
+            (m for m in matches if m.citation_index == cite.citation_index),
+            None,
+        )
+        # If uniquely matched and we can count authors on the reference, skip noisy review.
+        if match and match.status == MatchStatus.MATCHED and match.reference_index is not None:
+            ref = next((r for r in refs if r.paragraph_index == match.reference_index), None)
+            if ref and ref.author_span:
+                author_text = ref.author_span.text
+                # Heuristic author count: commas / & / and
+                approx = 1 + author_text.count(",") + len(re.findall(r"\s&\s|\sand\s", author_text))
+                if approx >= 3:
+                    continue
         issues.append(
             Issue(
                 rule_id="APA7-CITATION-ETAL-REVIEW",
@@ -116,7 +132,7 @@ def _detect_et_al_uncertain(context: RuleContext) -> list[Issue]:
                 severity=Severity.INFO,
                 fixability=Fixability.CONDITIONAL,
                 can_fix=False,
-                confidence=0.6,
+                confidence=0.55,
                 source=SOURCE_CITE,
                 reason_not_fixable=(
                     "et al. is never auto-corrected; matching author counts may be uncertain."
@@ -124,6 +140,7 @@ def _detect_et_al_uncertain(context: RuleContext) -> list[Issue]:
                 paragraph_index=cite.paragraph_index,
                 region=Region.BODY,
                 citation_index=cite.citation_index,
+                match_status=match.status.value if match else None,
             )
         )
     return issues

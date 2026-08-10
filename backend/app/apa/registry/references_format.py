@@ -400,15 +400,20 @@ RULES = [
     BaseRule(
         rule_id="APA7-REFERENCE-007",
         category="References",
-        description="Reference-list spacing consistency (covered with 005/006).",
+        description=(
+            "DEPRECATED alias: reference-list spacing consistency is covered by "
+            "APA7-REFERENCE-005 and APA7-REFERENCE-006. Retained only for coverage "
+            "compatibility; detector intentionally empty."
+        ),
         official_expectation="Consistent double spacing throughout references",
         source=SOURCE_REFS,
-        fixability=Fixability.SAFE_AUTO_FIX,
+        fixability=Fixability.UNSUPPORTED,
         applicable_regions=("REFERENCE_ENTRY",),
-        detector=lambda context: [],  # covered by 005/006 to avoid duplicates
+        detector=lambda context: [],  # deprecated duplicate of 005/006
         fixer=None,
         production_supported=False,
         fixer_implemented=False,
+        detector_implemented=False,
     ),
     BaseRule(
         rule_id="APA7-REFERENCE-008",

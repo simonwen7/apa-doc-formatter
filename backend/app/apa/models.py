@@ -188,7 +188,12 @@ class AnalysisResult:
 
     @property
     def formatting_compliance_score(self) -> int:
-        # Separates formatting from author-action: only SAFE issues affect score.
+        """FORMATTING compliance only (not overall APA correctness).
+
+        Score decreases solely with outstanding SAFE_AUTO_FIX issues.
+        AUTHOR_ACTION_REQUIRED / CONDITIONAL / UNSUPPORTED issues do not
+        reduce this score and must not be presented as "APA perfect."
+        """
         return max(0, 100 - self.safe_fix_count * 2)
 
     @property
@@ -250,6 +255,8 @@ class AnalysisResult:
                 # Compatibility with existing frontend fields:
                 "score": self.formatting_compliance_score,
                 "issue_count": self.safe_fix_count + self.author_action_count,
+                # Explicit naming so clients do not treat score as overall APA correctness.
+                "score_scope": "formatting_safe_auto_fix_only",
             },
             # Compatibility: existing UI groups by category/message.
             "issues": legacy_issues,

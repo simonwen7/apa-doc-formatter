@@ -51,7 +51,8 @@ def _detect_citation_without_reference(context: RuleContext) -> list[Issue]:
     for match in matches:
         if match.status != MatchStatus.CITATION_WITHOUT_REFERENCE:
             continue
-        if match.confidence < 0.8:
+        # Definite missing-reference warnings require high confidence.
+        if match.confidence < 0.9:
             continue
         cite = next(
             (c for c in context.citations if c.citation_index == match.citation_index),

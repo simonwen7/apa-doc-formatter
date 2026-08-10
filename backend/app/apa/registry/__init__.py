@@ -21,6 +21,7 @@ def _modules():
         global_format,
         headings,
         lists,
+        phase2f_p0,
         references_content,
         references_format,
         tables,
@@ -43,6 +44,7 @@ def _modules():
         appendices,
         lists,
         equations,
+        phase2f_p0,
     )
 
 

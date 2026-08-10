@@ -83,9 +83,11 @@ async def fix_document(
     )
     persisted_path = save_fixed_document(document_id, output_path)
 
-    validation_after_fix = analyze_document_path(
-        str(output_path), template_id=template_id
-    ).to_api_dict()
+    analysis_after = analyze_document_path(str(output_path), template_id=template_id)
+    api_after = analysis_after.to_api_dict()
+
+    verification = fix_result.get("verification") or {}
+    preservation = fix_result.get("preservation") or {}
 
     return {
         "document_id": document_id,
@@ -94,11 +96,30 @@ async def fix_document(
         "fixed_file_path": persisted_path,
         "download_url": f"/documents/download/{document_id}",
         "fixed_counts": fix_result["fixed_counts"],
+        # Legacy-compatible shape retained.
         "validation_after_fix": {
-            "summary": validation_after_fix["summary"],
-            "issues": validation_after_fix["issues"],
+            "summary": api_after["summary"],
+            "issues": api_after["issues"],
+            # Additive full schema (shared with Analyze).
+            "safe_auto_fix": api_after["safe_auto_fix"],
+            "author_action_required": api_after["author_action_required"],
+            "uncertain": api_after["uncertain"],
+            "unsupported": api_after["unsupported"],
+            "template_id": api_after["template_id"],
         },
-        "verification": fix_result["verification"],
+        "verification": {
+            **verification,
+            "text_integrity_ok": verification.get("text_integrity_ok", True),
+            "document_preservation_ok": verification.get(
+                "document_preservation_ok",
+                preservation.get("document_preservation_ok", True),
+            ),
+            "safe_issues_before": verification.get("safe_issues_before"),
+            "safe_issues_after": verification.get("safe_issues_after"),
+            "author_action_issues": verification.get("author_action_issues"),
+            "verified": verification.get("verified"),
+        },
+        "preservation": preservation,
         "safe_auto_fix_after": fix_result["safe_auto_fix_after"],
         "author_action_required": fix_result["author_action_required"],
         "engine": fix_result["engine"],
