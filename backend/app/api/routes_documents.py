@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
 from app.apa.engine.analyzer import analyze_document_path
@@ -12,6 +12,12 @@ from app.services.document_store import (
     temp_fixed_path,
     write_temp_upload,
 )
+from app.services.download_auth import (
+    make_download_token,
+    validate_document_id,
+    validate_docx_upload,
+    verify_download_token,
+)
 from app.services.parser import parse_docx
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -22,15 +28,21 @@ async def analyze_document(
     file: UploadFile = File(...),
     template_id: str = Form(...),
 ):
-    if not file.filename.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Only .docx files are supported.")
+    content = await file.read()
+    validate_docx_upload(filename=file.filename, content=content)
 
     document_id = str(uuid4())
-    content = await file.read()
     input_path = write_temp_upload(document_id, content)
 
-    parsed = parse_docx(str(input_path))
-    analysis = analyze_document_path(str(input_path), template_id=template_id)
+    try:
+        parsed = parse_docx(str(input_path))
+        analysis = analyze_document_path(str(input_path), template_id=template_id)
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to read this .docx file. It may be corrupt or unsupported.",
+        ) from None
+
     api_payload = analysis.to_api_dict()
 
     # Compatibility: previous clients expected docx_validation/parsed_validation.
@@ -68,19 +80,25 @@ async def fix_document(
     file: UploadFile = File(...),
     template_id: str = Form(...),
 ):
-    if not file.filename.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Only .docx files are supported.")
+    content = await file.read()
+    validate_docx_upload(filename=file.filename, content=content)
 
     document_id = str(uuid4())
-    content = await file.read()
     input_path = write_temp_upload(document_id, content)
     output_path = temp_fixed_path(document_id)
 
-    fix_result = fix_document_path(
-        str(input_path),
-        str(output_path),
-        template_id=template_id,
-    )
+    try:
+        fix_result = fix_document_path(
+            str(input_path),
+            str(output_path),
+            template_id=template_id,
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to format this .docx file. The original upload was not changed.",
+        ) from None
+
     persisted_path = save_fixed_document(document_id, output_path)
 
     analysis_after = analyze_document_path(str(output_path), template_id=template_id)
@@ -88,13 +106,15 @@ async def fix_document(
 
     verification = fix_result.get("verification") or {}
     preservation = fix_result.get("preservation") or {}
+    download_token = make_download_token(document_id)
 
     return {
         "document_id": document_id,
         "filename": file.filename,
         "template": template_id,
+        # Logical storage key only — never expose host filesystem paths.
         "fixed_file_path": persisted_path,
-        "download_url": f"/documents/download/{document_id}",
+        "download_url": f"/documents/download/{document_id}?token={download_token}",
         "fixed_counts": fix_result["fixed_counts"],
         # Legacy-compatible shape retained.
         "validation_after_fix": {
@@ -127,7 +147,12 @@ async def fix_document(
 
 
 @router.get("/download/{document_id}")
-async def download_fixed_document(document_id: str):
+async def download_fixed_document(
+    document_id: str,
+    token: str | None = Query(default=None),
+):
+    validate_document_id(document_id)
+    verify_download_token(document_id, token)
     content, filename = load_fixed_document(document_id)
 
     return Response(

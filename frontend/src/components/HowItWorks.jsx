@@ -16,7 +16,7 @@ export default function HowItWorks() {
       number: "03",
       title: "Preview and download",
       description:
-        "Apply corrections, review the changes, and download your APA-ready file.",
+        "Apply supported formatting fixes, review author items, and download your file.",
     },
   ];
 

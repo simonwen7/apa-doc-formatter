@@ -148,6 +148,7 @@ describe("normalizeFixResponse", () => {
 
   it("fails when verified is false or safe_after != 0", () => {
     const failed = normalizeFixResponse({
+      download_url: "/documents/download/should-not-offer",
       verification: {
         verified: false,
         safe_issues_after: 2,
@@ -157,8 +158,10 @@ describe("normalizeFixResponse", () => {
       validation_after_fix: { summary: {}, safe_auto_fix: [], author_action_required: [] },
     });
     assert.equal(failed.formattingSucceeded, false);
+    assert.equal(failed.downloadUrl, null);
 
     const leftover = normalizeFixResponse({
+      download_url: "/documents/download/should-not-offer",
       verification: {
         verified: true,
         safe_issues_after: 1,
@@ -168,5 +171,6 @@ describe("normalizeFixResponse", () => {
       validation_after_fix: { summary: {}, safe_auto_fix: [], author_action_required: [] },
     });
     assert.equal(leftover.formattingSucceeded, false);
+    assert.equal(leftover.downloadUrl, null);
   });
 });

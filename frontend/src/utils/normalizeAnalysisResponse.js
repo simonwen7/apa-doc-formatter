@@ -184,7 +184,8 @@ export function normalizeFixResponse(payload) {
     verified && safeIssuesAfter === 0 && textIntegrityOk && documentPreservationOk;
 
   return {
-    downloadUrl: payload?.download_url || null,
+    // Never advertise a download when verification failed.
+    downloadUrl: formattingSucceeded ? payload?.download_url || null : null,
     fixedCounts: payload?.fixed_counts || {},
     verification: {
       verified,

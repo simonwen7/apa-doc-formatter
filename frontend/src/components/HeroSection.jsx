@@ -6,14 +6,14 @@ export default function HeroSection({ onFormatClick }) {
       </p>
 
       <h1 id="hero-heading" className="heroHeading animate-fade-rise-delay">
-        Turn your <span className="ideas">ideas</span> into a paper{" "}
-        <span className="mutedWord">ready to submit.</span>
+        Turn your <span className="ideas">ideas</span> into a paper with{" "}
+        <span className="mutedWord">cleaner APA formatting.</span>
       </h1>
 
       <p className="heroDescription animate-fade-rise-delay-2">
-        Format your document with consistent APA 7 structure, spacing,
-        typography, headings, and references—without rebuilding every page by
-        hand.
+        Forma APA checks supported APA 7 Student Paper formatting, safely fixes
+        formatting-only issues, and flags items that still need your review—without
+        rewriting your words.
       </p>
 
       <div className="heroActions animate-fade-rise-delay-2">

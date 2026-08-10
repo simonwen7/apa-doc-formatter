@@ -94,7 +94,8 @@ def save_fixed_document(document_id: str, source_path: Path) -> str:
     destination = temp_fixed_path(document_id)
     if source_path.resolve() != destination.resolve():
         destination.write_bytes(source_path.read_bytes())
-    return str(destination)
+    # Return a logical pathname (never an absolute host filesystem path).
+    return fixed_pathname(document_id)
 
 
 def load_fixed_document(document_id: str) -> tuple[bytes, str]:
