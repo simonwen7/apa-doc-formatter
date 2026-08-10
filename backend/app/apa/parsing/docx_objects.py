@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -118,19 +119,84 @@ def count_equations(doc: Document) -> int:
         return -1
 
 
+def snapshot_note_ids(path: str) -> dict[str, list[str]]:
+    """Extract footnote/endnote w:id values from package XML (empty if absent)."""
+    result = {"footnotes": [], "endnotes": []}
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            for part, key, tag in (
+                ("word/footnotes.xml", "footnotes", "w:footnote"),
+                ("word/endnotes.xml", "endnotes", "w:endnote"),
+            ):
+                if part not in zf.namelist():
+                    continue
+                data = zf.read(part).decode("utf-8", errors="ignore")
+                # Capture id attributes without logging note text.
+                ids = re.findall(rf"<{tag}[^>]*\bw:id=\"(\d+)\"", data)
+                if not ids:
+                    ids = re.findall(rf"<{tag}[^>]*\bid=\"(\d+)\"", data)
+                result[key] = ids
+    except Exception:
+        logger.info("preservation: unable to snapshot note ids for %s", Path(path).name)
+    return result
+
+
+def count_footnote_references(doc: Document) -> int:
+    """Count footnote reference marks in the document body."""
+    try:
+        return len(doc.element.body.findall(".//" + qn("w:footnoteReference")))
+    except Exception:
+        return -1
+
+
+def count_endnote_references(doc: Document) -> int:
+    try:
+        return len(doc.element.body.findall(".//" + qn("w:endnoteReference")))
+    except Exception:
+        return -1
+
+
 def count_footnotes_endnotes(doc: Document) -> tuple[int, int]:
+    from lxml import etree
+
     footnotes = 0
     endnotes = 0
     try:
-        part = getattr(doc.part, "footnotes_part", None)
-        if part is not None:
-            footnotes = len(part.element.findall(qn("w:footnote")))
+        found = False
+        for rel in doc.part.rels.values():
+            if "footnotes" not in (rel.reltype or "").lower():
+                continue
+            part = rel.target_part
+            element = getattr(part, "element", None)
+            if element is None and getattr(part, "blob", None):
+                element = etree.fromstring(part.blob)
+            if element is not None:
+                footnotes = len(element.findall(qn("w:footnote")))
+                found = True
+                break
+        if not found:
+            part = getattr(doc.part, "footnotes_part", None)
+            if part is not None:
+                footnotes = len(part.element.findall(qn("w:footnote")))
     except Exception:
         footnotes = -1
     try:
-        part = getattr(doc.part, "endnotes_part", None)
-        if part is not None:
-            endnotes = len(part.element.findall(qn("w:endnote")))
+        found = False
+        for rel in doc.part.rels.values():
+            if "endnotes" not in (rel.reltype or "").lower():
+                continue
+            part = rel.target_part
+            element = getattr(part, "element", None)
+            if element is None and getattr(part, "blob", None):
+                element = etree.fromstring(part.blob)
+            if element is not None:
+                endnotes = len(element.findall(qn("w:endnote")))
+                found = True
+                break
+        if not found:
+            part = getattr(doc.part, "endnotes_part", None)
+            if part is not None:
+                endnotes = len(part.element.findall(qn("w:endnote")))
     except Exception:
         endnotes = -1
     return footnotes, endnotes
@@ -219,6 +285,26 @@ def compare_document_preservation(
                 if b >= 0 and a >= 0 and a < b:
                     setattr(report, flag, False)
                     warnings.append(f"{part_name}_count_decreased")
+
+    before_note_ids = snapshot_note_ids(before_path)
+    after_note_ids = snapshot_note_ids(after_path)
+    if before_note_ids["footnotes"] != after_note_ids["footnotes"]:
+        report.footnotes_preserved = False
+        warnings.append("footnote_ids_changed")
+    if before_note_ids["endnotes"] != after_note_ids["endnotes"]:
+        report.endnotes_preserved = False
+        warnings.append("endnote_ids_changed")
+
+    before_fn_refs = count_footnote_references(before_doc)
+    after_fn_refs = count_footnote_references(after_doc)
+    if before_fn_refs >= 0 and after_fn_refs >= 0 and before_fn_refs != after_fn_refs:
+        report.footnotes_preserved = False
+        warnings.append("footnote_reference_count_changed")
+    before_en_refs = count_endnote_references(before_doc)
+    after_en_refs = count_endnote_references(after_doc)
+    if before_en_refs >= 0 and after_en_refs >= 0 and before_en_refs != after_en_refs:
+        report.endnotes_preserved = False
+        warnings.append("endnote_reference_count_changed")
 
     if count_hyperlinks(before_doc) != count_hyperlinks(after_doc):
         report.hyperlinks_preserved = False

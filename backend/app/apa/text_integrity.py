@@ -124,47 +124,80 @@ def _table_texts(doc: Document) -> list[tuple[str, str]]:
     return segments
 
 
+def _iter_note_roots(doc: Document, reltype_substring: str):
+    """Yield note XML roots via relationships (footnotes_part may be absent)."""
+    from lxml import etree
+
+    try:
+        for rel in doc.part.rels.values():
+            if reltype_substring not in (rel.reltype or "").lower():
+                continue
+            part = rel.target_part
+            element = getattr(part, "element", None)
+            if element is not None:
+                yield element
+                return
+            blob = getattr(part, "blob", None)
+            if blob:
+                yield etree.fromstring(blob)
+                return
+    except Exception:
+        pass
+    try:
+        if reltype_substring == "footnotes":
+            part = getattr(doc.part, "footnotes_part", None)
+            if part is not None:
+                yield part.element
+        elif reltype_substring == "endnotes":
+            part = getattr(doc.part, "endnotes_part", None)
+            if part is not None:
+                yield part.element
+    except Exception:
+        return
+
+
 def _footnote_endnote_texts(doc: Document) -> list[tuple[str, str]]:
-    """Best-effort extraction; python-docx has limited footnote APIs."""
+    """Best-effort extraction; python-docx has limited footnote APIs.
+
+    Labels prefer stable w:id values when present so Fix elsewhere cannot
+    silently drop note identity without failing integrity.
+    """
     segments: list[tuple[str, str]] = []
     try:
-        body = doc.element.body
+        _ = doc.element.body
     except Exception:
         return segments
 
     try:
-        footnotes_part = getattr(doc.part, "footnotes_part", None)
-        if footnotes_part is not None:
-            root = footnotes_part.element
+        for root in _iter_note_roots(doc, "footnotes"):
             for index, footnote in enumerate(root.findall(qn("w:footnote"))):
+                note_id = footnote.get(qn("w:id")) or str(index)
                 texts = [
                     node.text or ""
                     for node in footnote.iter(qn("w:t"))
                     if node.text
                 ]
-                segments.append((f"footnote[{index}]", "".join(texts)))
+                segments.append((f"footnote[id={note_id}]", "".join(texts)))
     except Exception:
         logger.info(
             "text_integrity: footnotes not fully supported by python-docx in this environment"
         )
 
     try:
-        endnotes_part = getattr(doc.part, "endnotes_part", None)
-        if endnotes_part is not None:
-            root = endnotes_part.element
+        for root in _iter_note_roots(doc, "endnotes"):
             for index, endnote in enumerate(root.findall(qn("w:endnote"))):
+                note_id = endnote.get(qn("w:id")) or str(index)
                 texts = [
                     node.text or ""
                     for node in endnote.iter(qn("w:t"))
                     if node.text
                 ]
-                segments.append((f"endnote[{index}]", "".join(texts)))
+                segments.append((f"endnote[id={note_id}]", "".join(texts)))
     except Exception:
         logger.info(
             "text_integrity: endnotes not fully supported by python-docx in this environment"
         )
 
-    _ = body
     return segments
 
 

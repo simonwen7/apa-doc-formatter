@@ -73,6 +73,19 @@ def _looks_like_false_positive(body: str) -> bool:
     # Year-first parentheticals like "(2020 was difficult)" are not citations.
     if re.match(r"^\(?\s*\d{4}", b) and "personal communication" not in b.lower():
         return True
+    # Version / model / course-code-like parentheticals.
+    if re.search(r"\b(v(?:ersion)?\s*\d|model\s*[A-Z0-9\-]+|eq(?:uation)?\.?\s*\d)\b", b, re.I):
+        return True
+    if re.fullmatch(r"[A-Z]{2,6}\s*\d{2,4}", b):
+        return True
+    # Acronym definitions: (American Psychological Association)
+    if re.fullmatch(r"[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,6}", b) and not re.search(
+        r"\d{4}|n\.d\.", b, re.I
+    ):
+        return True
+    # Figure/table callouts
+    if re.match(r"^(see\s+)?(table|figure|appendix)\s+[A-Z0-9]", b, re.I):
+        return True
     # Require an author-like token before the year for ordinary citations.
     if "personal communication" not in b.lower():
         if not re.search(

@@ -22,6 +22,7 @@ def _modules():
         headings,
         lists,
         phase2f_p0,
+        phase2g_p1,
         references_content,
         references_format,
         tables,
@@ -45,6 +46,7 @@ def _modules():
         lists,
         equations,
         phase2f_p0,
+        phase2g_p1,
     )
 
 

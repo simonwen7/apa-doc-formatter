@@ -113,11 +113,12 @@ def _detect_et_al_uncertain(context: RuleContext) -> list[Issue]:
         if match and match.status == MatchStatus.MATCHED and match.reference_index is not None:
             ref = next((r for r in refs if r.paragraph_index == match.reference_index), None)
             if ref and ref.author_span:
-                author_text = ref.author_span.text
-                # Heuristic author count: commas / & / and
-                approx = 1 + author_text.count(",") + len(re.findall(r"\s&\s|\sand\s", author_text))
-                if approx >= 3:
+                from app.apa.parsing.reference_entry import approximate_author_count
+
+                count = approximate_author_count(ref.author_span.text)
+                if count is not None and count >= 3:
                     continue
+                # Matched but author count uncertain — keep CONDITIONAL, not definite AUTHOR.
         issues.append(
             Issue(
                 rule_id="APA7-CITATION-ETAL-REVIEW",

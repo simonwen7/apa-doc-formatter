@@ -76,7 +76,12 @@ def _looks_like_date(text: str) -> bool:
     return bool(
         re.search(
             r"\b(january|february|march|april|may|june|july|august|september|"
-            r"october|november|december)\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
+            r"october|november|december|"
+            r"jan\.?|feb\.?|mar\.?|apr\.?|jun\.?|jul\.?|aug\.?|sep\.?|sept\.?|"
+            r"oct\.?|nov\.?|dec\.?)\b"
+            r"|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"
+            r"|\b\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}\b"
+            r"|\b[A-Za-z]{3,9}\s+\d{1,2},\s*\d{4}\b",
             text,
             flags=re.I,
         )
@@ -84,9 +89,11 @@ def _looks_like_date(text: str) -> bool:
 
 
 def _looks_like_course(text: str) -> bool:
+    # Accept CS 240, CS240, PSYCH 101, PSYCH 101: Introduction to Psychology, etc.
     return bool(
         re.search(
-            r"\b(course|psy|engl|hist|bio|math|cs|stat|[A-Z]{2,4}\s*\d{3})\b",
+            r"\b(course|psy(?:ch)?|engl|hist|bio|math|cs|stat|chem|phys|soc|anth)\b"
+            r"|[A-Z]{2,6}\s*\d{2,4}(?:\s*:\s*.+)?",
             text,
             flags=re.I,
         )
@@ -94,17 +101,44 @@ def _looks_like_course(text: str) -> bool:
 
 
 def _looks_like_instructor(text: str) -> bool:
-    return bool(re.search(r"\b(dr\.|prof\.|professor|instructor)\b", text, flags=re.I))
+    if re.search(r"\b(dr\.|prof\.|professor|instructor)\b", text, flags=re.I):
+        return True
+    # Bare personal name near end of title page is handled in refine pass.
+    return False
 
 
 def _looks_like_affiliation(text: str) -> bool:
     return bool(
         re.search(
-            r"\b(university|college|department|school|institute)\b",
+            r"\b(university|college|department|school|institute|faculty|program|"
+            r"centre|center|academy|polytechnic)\b",
             text,
             flags=re.I,
         )
     )
+
+
+def _looks_like_person_name(text: str) -> bool:
+    """Conservative person-name heuristic for title-page authors (not citations)."""
+    t = (text or "").strip()
+    if not t or len(t) > 80:
+        return False
+    if _looks_like_date(t) or _looks_like_course(t) or _looks_like_affiliation(t):
+        return False
+    if re.search(r"\b(dr\.|prof\.|professor|instructor|acknowledg|thanks)\b", t, re.I):
+        return False
+    # "Jane Student" / "Jane A. Student" / "Jane Student and John Student"
+    if re.match(
+        r"^[A-Z][A-Za-z'’\-]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][A-Za-z'’\-]+)+"
+        r"(?:\s+(?:and|&)\s+[A-Z][A-Za-z'’\-]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][A-Za-z'’\-]+)+)*"
+        r"$",
+        t,
+    ):
+        return True
+    # Comma form: "Student, Jane"
+    if re.match(r"^[A-Z][A-Za-z'’\-]+,\s*[A-Z][A-Za-z'’\-\.\s]+$", t) and len(t.split()) <= 5:
+        return True
+    return False
 
 
 def _find_section_markers(paragraphs: list[Paragraph]) -> dict:
@@ -458,9 +492,18 @@ def classify_document(doc: Document) -> list[ClassifiedParagraph]:
                 elif _looks_like_affiliation(stripped):
                     title_element = "affiliation"
                     confidence = max(confidence, 0.84)
-                elif index == (paper_title_idx or -1) + 1:
+                elif paper_title_idx is not None and index > paper_title_idx and _looks_like_person_name(
+                    stripped
+                ):
+                    # May be one of multiple authors; refined below.
                     title_element = "author"
                     confidence = max(confidence, 0.82)
+                    evidence.append("author_name_heuristic")
+                elif index == (paper_title_idx or -1) + 1:
+                    # Fallback single-author slot when name heuristic is weak.
+                    title_element = "author"
+                    confidence = max(confidence, 0.78)
+                    evidence.append("author_position_fallback")
             elif style.lower().startswith("heading"):
                 # Ambiguous heading style after body start without clear level.
                 region = Region.HEADING
@@ -487,7 +530,84 @@ def classify_document(doc: Document) -> list[ClassifiedParagraph]:
         )
 
     classified = _apply_block_quote_pass(classified)
+    classified = _refine_title_page_authors(classified)
     return _apply_phase2d_region_pass(doc, classified)
+
+
+def _refine_title_page_authors(
+    classified: list[ClassifiedParagraph],
+) -> list[ClassifiedParagraph]:
+    """Mark consecutive title-page person-name lines as authors; avoid metadata FPs."""
+    title_idx = next(
+        (c.index for c in classified if c.region == Region.PAPER_TITLE),
+        None,
+    )
+    if title_idx is None:
+        return classified
+
+    by_index = {c.index: c for c in classified}
+    # Title-page block ends at first body/abstract/etc.
+    title_page_idxs = sorted(
+        c.index
+        for c in classified
+        if c.region in {Region.TITLE_PAGE, Region.PAPER_TITLE} and c.index >= title_idx
+    )
+    # After affiliations begin, a bare name near the end may be the instructor.
+    seen_affiliation = False
+    seen_course = False
+    for idx in title_page_idxs:
+        item = by_index[idx]
+        text = (item.text or "").strip()
+        if not text or item.region == Region.PAPER_TITLE:
+            continue
+        if item.title_element == "affiliation" or _looks_like_affiliation(text):
+            seen_affiliation = True
+            continue
+        if item.title_element == "course" or _looks_like_course(text):
+            seen_course = True
+            continue
+        if item.title_element in {"instructor", "due_date"}:
+            continue
+        if item.title_element == "author":
+            # Demote false author after course/affiliation if it looks like instructor name.
+            if (seen_course or seen_affiliation) and _looks_like_person_name(text):
+                # Keep as author only if still in author block (before course).
+                if seen_course:
+                    by_index[idx] = ClassifiedParagraph(
+                        index=item.index,
+                        paragraph=item.paragraph,
+                        region=item.region,
+                        confidence=max(item.confidence, 0.84),
+                        text=item.text,
+                        style_name=item.style_name,
+                        heading_level=item.heading_level,
+                        evidence=tuple([*item.evidence, "instructor_position_refine"]),
+                        title_element="instructor",
+                        is_block_quote_candidate=item.is_block_quote_candidate,
+                        block_quote_confidence=item.block_quote_confidence,
+                    )
+            continue
+        # Promote untagged person names before course/affiliation to author.
+        if (
+            not seen_course
+            and not item.title_element
+            and _looks_like_person_name(text)
+        ):
+            by_index[idx] = ClassifiedParagraph(
+                index=item.index,
+                paragraph=item.paragraph,
+                region=item.region,
+                confidence=max(item.confidence, 0.83),
+                text=item.text,
+                style_name=item.style_name,
+                heading_level=item.heading_level,
+                evidence=tuple([*item.evidence, "author_refine"]),
+                title_element="author",
+                is_block_quote_candidate=item.is_block_quote_candidate,
+                block_quote_confidence=item.block_quote_confidence,
+            )
+
+    return [by_index[c.index] for c in classified]
 
 
 def _apply_phase2d_region_pass(

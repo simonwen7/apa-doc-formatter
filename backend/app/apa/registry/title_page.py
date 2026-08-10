@@ -360,14 +360,16 @@ def _detect_missing_title_metadata(context: RuleContext) -> list[Issue]:
         (
             "APA7-TITLE-012",
             "affiliation",
-            r"\b(university|college|department|school|institute)\b",
+            r"\b(university|college|department|school|institute|faculty|program|"
+            r"centre|center|academy|polytechnic)\b",
             "Affiliation was not clearly detected on the title page.",
             "affiliation" in elements,
         ),
         (
             "APA7-TITLE-013",
             "course",
-            r"\b(course|psy|engl|hist|bio|math|cs|stat)\b|\b\d{3}\b",
+            r"\b(course|psy(?:ch)?|engl|hist|bio|math|cs|stat|chem|phys)\b|"
+            r"[A-Za-z]{2,6}\s*\d{2,4}",
             "Course number/name was not clearly detected on the title page.",
             "course" in elements,
         ),
@@ -381,7 +383,12 @@ def _detect_missing_title_metadata(context: RuleContext) -> list[Issue]:
         (
             "APA7-TITLE-015",
             "due date",
-            r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
+            r"\b(january|february|march|april|may|june|july|august|september|"
+            r"october|november|december|jan\.?|feb\.?|mar\.?|apr\.?|jun\.?|"
+            r"jul\.?|aug\.?|sep\.?|sept\.?|oct\.?|nov\.?|dec\.?)\b|"
+            r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|"
+            r"\b\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}\b|"
+            r"\b[A-Za-z]{3,9}\s+\d{1,2},\s*\d{4}\b",
             "Assignment due date was not clearly detected on the title page.",
             "due_date" in elements,
         ),
