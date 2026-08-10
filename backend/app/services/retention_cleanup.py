@@ -58,7 +58,7 @@ def cleanup_expired_fixed_documents(
     Never deletes outside the fixed/ namespace (list_fixed_objects enforces this).
     """
     hours = (
-        app_config.DOCUMENT_RETENTION_HOURS
+        app_config.document_retention_hours()
         if retention_hours is None
         else int(retention_hours)
     )

@@ -2,7 +2,6 @@
  * Central authenticated API helpers for Forma APA.
  * Retrieves the current Supabase session access token — never duplicates JWTs.
  */
-import { supabase } from "../supabaseClient";
 
 export class AuthSessionError extends Error {
   constructor(message = "Your session has expired. Please sign in again.") {
@@ -11,11 +10,27 @@ export class AuthSessionError extends Error {
   }
 }
 
+/** @type {null | (() => Promise<{ data: { session: { access_token?: string } | null }, error: Error | null }>)} */
+let getSessionOverride = null;
+
+/** Test-only hook — do not use in production UI. */
+export function __setGetSessionForTests(fn) {
+  getSessionOverride = fn;
+}
+
+async function readSession() {
+  if (getSessionOverride) {
+    return getSessionOverride();
+  }
+  const { supabase } = await import("../supabaseClient.js");
+  return supabase.auth.getSession();
+}
+
 export async function getAccessToken() {
   const {
     data: { session },
     error,
-  } = await supabase.auth.getSession();
+  } = await readSession();
 
   if (error || !session?.access_token) {
     throw new AuthSessionError();
@@ -49,7 +64,7 @@ export async function authenticatedFetch(url, options = {}) {
   return response;
 }
 
-function filenameFromContentDisposition(headerValue) {
+export function filenameFromContentDisposition(headerValue) {
   if (!headerValue) return null;
   const utfMatch = /filename\*=UTF-8''([^;]+)/i.exec(headerValue);
   if (utfMatch?.[1]) {
@@ -60,32 +75,49 @@ function filenameFromContentDisposition(headerValue) {
     }
   }
   const plainMatch = /filename="?([^";]+)"?/i.exec(headerValue);
-  return plainMatch?.[1] || null;
+  const name = plainMatch?.[1] || null;
+  if (!name) return null;
+  // Basename only; strip directories / separators / traversal fragments.
+  const safe = name
+    .split(/[/\\]/)
+    .pop()
+    .replace(/\.\./g, "")
+    .trim();
+  return safe || null;
 }
 
 /**
  * Download a protected DOCX through the app API (Bearer + optional token query).
  * Uses a temporary object URL — never exposes private Blob URLs.
  */
-export async function downloadAuthenticatedFile(url, fallbackFilename = "formatted.docx") {
-  const response = await authenticatedFetch(url, { method: "GET" });
+export async function downloadAuthenticatedFile(
+  url,
+  fallbackFilename = "formatted.docx",
+  hooks = {}
+) {
+  const createObjectURL = hooks.createObjectURL || URL.createObjectURL.bind(URL);
+  const revokeObjectURL = hooks.revokeObjectURL || URL.revokeObjectURL.bind(URL);
+  const fetchImpl = hooks.fetchImpl || authenticatedFetch;
 
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    const detail =
-      typeof data?.detail === "string"
-        ? data.detail
-        : `Download failed with status ${response.status}.`;
-    throw new Error(detail);
-  }
-
-  const blob = await response.blob();
-  const filename =
-    filenameFromContentDisposition(response.headers.get("Content-Disposition")) ||
-    fallbackFilename;
-
-  const objectUrl = URL.createObjectURL(blob);
+  let objectUrl = null;
   try {
+    const response = await fetchImpl(url, { method: "GET" });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const detail =
+        typeof data?.detail === "string"
+          ? data.detail
+          : `Download failed with status ${response.status}.`;
+      throw new Error(detail);
+    }
+
+    const blob = await response.blob();
+    const filename =
+      filenameFromContentDisposition(response.headers.get("Content-Disposition")) ||
+      fallbackFilename;
+
+    objectUrl = createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
     anchor.download = filename;
@@ -93,8 +125,17 @@ export async function downloadAuthenticatedFile(url, fallbackFilename = "formatt
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
+    return filename;
   } finally {
-    // Revoke shortly after click so the download can start.
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    if (objectUrl) {
+      const revoke = () => revokeObjectURL(objectUrl);
+      if (hooks.revokeImmediately) {
+        revoke();
+      } else if (typeof window !== "undefined" && window.setTimeout) {
+        window.setTimeout(revoke, 1000);
+      } else {
+        revoke();
+      }
+    }
   }
 }

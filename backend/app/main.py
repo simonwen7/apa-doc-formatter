@@ -3,16 +3,22 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes_documents import router as documents_router
 from app.api.routes_internal import router as internal_router
-from app.core.config import CORS_ALLOWED_ORIGINS
+from app.core.config import CORS_ALLOWED_ORIGINS, parse_cors_origins
 
 app = FastAPI(
     title="DOC Formatter API",
     version="1.0.0",
 )
 
+# Re-parse at startup so tests/env overrides remain valid; fall back to module list.
+try:
+    _cors_origins = parse_cors_origins()
+except ValueError:
+    _cors_origins = CORS_ALLOWED_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     # Authorization must be explicitly allowed for authenticated SPA calls.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Forma APA release readiness check (Phase 3C).
+# Forma APA release readiness check (Phase 3D).
 # Verifies readiness only — does NOT deploy or push.
 set -euo pipefail
 
@@ -11,6 +11,16 @@ echo "== Forma APA release check =="
 echo "Root: $ROOT"
 
 echo
+echo "-- Git secret hygiene (tracked env files) --"
+cd "$ROOT"
+if git ls-files | grep -E '(^|/)\.env($|\.)' >/dev/null; then
+  echo "BLOCKER: env files appear tracked by git"
+  git ls-files | grep -E '(^|/)\.env($|\.)' || true
+  exit 1
+fi
+echo "no_tracked_env_files_ok"
+
+echo
 echo "-- Backend: import app --"
 cd "$BACKEND"
 if [[ -f "$BACKEND/venv/bin/activate" ]]; then
@@ -20,7 +30,7 @@ fi
 python -c "from app.main import app; print('app_ok', app.title if hasattr(app, 'title') else True)"
 
 echo
-echo "-- Backend: production secret policy (unit) --"
+echo "-- Backend: production secret + CORS policy (unit) --"
 python - <<'PY'
 from app.core import config as c
 prev_prod = c.IS_PRODUCTION
@@ -35,14 +45,19 @@ try:
         c.resolve_download_secret()
         raise SystemExit('expected production secret failure')
     except RuntimeError:
-        print('production_secret_policy_ok')
+        pass
+    try:
+        c.parse_cors_origins('*')
+        raise SystemExit('expected cors wildcard failure')
+    except ValueError:
+        print('production_secret_and_cors_policy_ok')
 finally:
     c.IS_PRODUCTION = prev_prod
     c.DOCUMENT_DOWNLOAD_SECRET = prev_secret
 PY
 
 echo
-echo "-- Backend: APA + auth/ownership/retention tests --"
+echo "-- Backend: APA + auth/ownership/retention/ops tests --"
 python -m pytest tests/apa -q
 
 echo
@@ -60,4 +75,4 @@ npm run build
 
 echo
 echo "== Release check PASSED =="
-echo "Manual remaining gates: logged-in browser Analyze/Fix/Download; configure Vercel env + cleanup cron."
+echo "Manual remaining gates: configure Vercel env + CRON_SECRET; logged-in E2E with backend Supabase vars."

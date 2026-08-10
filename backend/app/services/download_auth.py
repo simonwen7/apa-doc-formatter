@@ -14,10 +14,8 @@ import time
 
 from fastapi import HTTPException
 
-from app.core.config import (
-    DOCUMENT_DOWNLOAD_TOKEN_TTL_SECONDS,
-    resolve_download_secret,
-)
+from app.core.config import resolve_download_secret, download_token_ttl_seconds
+
 
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -56,7 +54,7 @@ def make_download_token(
     """
     user_id = validate_user_id(user_id)
     document_id = validate_document_id(document_id)
-    ttl = DOCUMENT_DOWNLOAD_TOKEN_TTL_SECONDS if ttl_seconds is None else int(ttl_seconds)
+    ttl = download_token_ttl_seconds() if ttl_seconds is None else int(ttl_seconds)
     if ttl <= 0:
         raise ValueError("ttl_seconds must be positive")
     expires_at = int(now if now is not None else time.time()) + ttl

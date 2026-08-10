@@ -39,6 +39,7 @@ def _auth_and_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(app_config, "DOCUMENT_DOWNLOAD_TOKEN_TTL_SECONDS", 3600)
     monkeypatch.setattr(app_config, "DOCUMENT_RETENTION_HOURS", 24)
     monkeypatch.setattr(app_config, "CLEANUP_JOB_SECRET", "cleanup-secret-for-tests")
+    monkeypatch.setattr(app_config, "CRON_SECRET", "cleanup-secret-for-tests")
 
     def verifier(token: str) -> AuthenticatedUser:
         if token == TOKEN_A:

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import hmac
-import os
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.core import config as app_config
 from app.services.retention_cleanup import cleanup_expired_fixed_documents
@@ -13,25 +12,74 @@ from app.services.retention_cleanup import cleanup_expired_fixed_documents
 router = APIRouter(prefix="/internal", tags=["internal"])
 
 
-def _require_cleanup_secret(secret: str | None) -> None:
-    expected = (app_config.CLEANUP_JOB_SECRET or "").strip()
-    if not expected:
+def _require_cleanup_auth(
+    *,
+    authorization: str | None,
+    x_cleanup_secret: str | None,
+) -> None:
+    """
+    Authenticate cleanup invocations.
+
+    Official Vercel Cron (preferred):
+      Authorization: Bearer <CRON_SECRET>
+
+    Manual/ops fallback:
+      X-Cleanup-Secret: <CLEANUP_JOB_SECRET or CRON_SECRET>
+    """
+    accepted = app_config.resolve_cleanup_secrets()
+    if not accepted:
         raise HTTPException(status_code=503, detail="Cleanup job is not configured.")
 
-    if not secret or not hmac.compare_digest(expected, secret.strip()):
-        raise HTTPException(status_code=401, detail="Unauthorized.")
+    # 1) Official Vercel Cron Authorization header.
+    if authorization:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() == "bearer" and token.strip():
+            presented = token.strip()
+            if any(hmac.compare_digest(presented, expected) for expected in accepted):
+                return
+
+    # 2) Manual header for curl / external schedulers.
+    if x_cleanup_secret and x_cleanup_secret.strip():
+        presented = x_cleanup_secret.strip()
+        if any(hmac.compare_digest(presented, expected) for expected in accepted):
+            return
+
+    raise HTTPException(status_code=401, detail="Unauthorized.")
 
 
-@router.post("/cleanup-fixed-documents")
-async def cleanup_fixed_documents(
+async def _run_cleanup(
+    request: Request,
+    x_cleanup_secret: str | None,
+) -> dict:
+    authorization = request.headers.get("authorization")
+    _require_cleanup_auth(
+        authorization=authorization,
+        x_cleanup_secret=x_cleanup_secret,
+    )
+    report = cleanup_expired_fixed_documents(
+        retention_hours=app_config.document_retention_hours(),
+    )
+    return {"ok": True, "cleanup": report.to_dict()}
+
+
+@router.get("/cleanup-fixed-documents")
+async def cleanup_fixed_documents_get(
+    request: Request,
     x_cleanup_secret: str | None = Header(default=None, alias="X-Cleanup-Secret"),
 ):
     """
-    Delete expired fixed documents under the `fixed/` namespace.
+    Vercel Cron entrypoint (GET).
 
-    Protect with CLEANUP_JOB_SECRET. Configure a Vercel Cron (or equivalent)
-    to call this endpoint periodically — not enabled automatically by this phase.
+    Secured by CRON_SECRET via Authorization: Bearer <secret>.
+    Schedule is declared in vercel.json.
     """
-    _require_cleanup_secret(x_cleanup_secret)
-    report = cleanup_expired_fixed_documents()
-    return {"ok": True, "cleanup": report.to_dict()}
+    return await _run_cleanup(request, x_cleanup_secret)
+
+
+@router.post("/cleanup-fixed-documents")
+async def cleanup_fixed_documents_post(
+    request: Request,
+    x_cleanup_secret: str | None = Header(default=None, alias="X-Cleanup-Secret"),
+):
+    """Manual / alternate scheduler entrypoint (POST). Same auth rules as GET."""
+    return await _run_cleanup(request, x_cleanup_secret)
