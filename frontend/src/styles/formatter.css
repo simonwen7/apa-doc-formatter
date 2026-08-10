@@ -547,6 +547,130 @@
   font-size: 0.9rem;
 }
 
+.scoreSplitStats {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.scoreSplitStats > div {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.scoreSplitStats strong {
+  min-width: 1.5rem;
+  font-size: 1rem;
+  color: hsl(var(--foreground));
+}
+
+.scoreSplitStats span {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.reportSection {
+  margin-top: 8px;
+}
+
+.postFixReview {
+  margin: 8px 0 28px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: hsl(var(--muted) / 0.55);
+  border: 1px solid hsl(var(--border) / 0.7);
+}
+
+.issueCountBadge--review {
+  background: hsl(var(--warning) / 0.16);
+  color: hsl(38 70% 72%);
+}
+
+.issueCountBadge--uncertain {
+  background: hsl(var(--muted-foreground) / 0.18);
+  color: hsl(var(--muted-foreground));
+}
+
+.issueGroup--review {
+  border-color: hsl(var(--warning) / 0.28);
+}
+
+.issueGroup--uncertain {
+  border-color: hsl(var(--border) / 0.9);
+  opacity: 0.95;
+}
+
+.issueBullet--review {
+  background: hsl(var(--warning) / 0.16);
+  color: hsl(38 70% 72%);
+  font-size: 0.5625rem;
+  letter-spacing: 0.02em;
+}
+
+.issueBullet--uncertain {
+  background: hsl(var(--muted-foreground) / 0.16);
+  color: hsl(var(--muted-foreground));
+}
+
+.issueBody {
+  min-width: 0;
+  flex: 1;
+}
+
+.issueMeta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 10px 0 0;
+}
+
+.issueMeta dt {
+  margin: 0;
+  color: hsl(var(--subtle-foreground));
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.issueMeta dd {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.issueReason {
+  margin: 10px 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.reviewPill,
+.possibleIssuePill {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 8px 0 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
+.reviewPill {
+  background: hsl(var(--warning) / 0.14);
+  color: hsl(38 70% 72%);
+}
+
+.possibleIssuePill {
+  margin-top: 8px;
+  background: hsl(var(--muted-foreground) / 0.14);
+  color: hsl(var(--muted-foreground));
+}
+
 .sectionHeading {
   display: flex;
   align-items: flex-start;

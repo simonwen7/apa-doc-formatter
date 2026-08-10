@@ -1,3 +1,5 @@
+import { formattingFixButtonLabel } from "../utils/normalizeAnalysisResponse";
+
 export default function PaperSetupPanel({
   templateId,
   templateOptions,
@@ -9,12 +11,15 @@ export default function PaperSetupPanel({
   file,
   analyzeResult,
   fixResult,
-  issueCount,
+  safeCount,
+  canFix,
   loadingAction,
 }) {
   const selectedTemplate =
     templateOptions.find((option) => option.id === templateId) ||
     templateOptions[0];
+
+  const fixLabel = formattingFixButtonLabel(safeCount);
 
   return (
     <aside className="panel liquid-glass-panel" aria-labelledby="paper-setup-heading">
@@ -56,6 +61,7 @@ export default function PaperSetupPanel({
             className="primaryButton isFull"
             onClick={onAnalyze}
             disabled={!file || isLoading}
+            aria-busy={loadingAction === "analyze"}
           >
             {loadingAction === "analyze" && (
               <span className="spinner" aria-hidden="true" />
@@ -66,20 +72,21 @@ export default function PaperSetupPanel({
           </button>
         )}
 
-        {analyzeResult && !fixResult && issueCount > 0 && (
+        {analyzeResult && !fixResult && canFix && (
           <>
             <button
               type="button"
               className="primaryButton isFull"
               onClick={onFix}
               disabled={isLoading}
+              aria-busy={loadingAction === "fix"}
             >
               {loadingAction === "fix" && (
                 <span className="spinner" aria-hidden="true" />
               )}
               {loadingAction === "fix"
-                ? "Formatting…"
-                : `Fix ${issueCount} Issues`}
+                ? "Applying APA formatting…"
+                : fixLabel}
             </button>
 
             <button
@@ -93,7 +100,7 @@ export default function PaperSetupPanel({
           </>
         )}
 
-        {analyzeResult && !fixResult && issueCount === 0 && (
+        {analyzeResult && !fixResult && !canFix && (
           <button
             type="button"
             className="secondaryButton"
@@ -111,7 +118,7 @@ export default function PaperSetupPanel({
             onClick={onAnalyzeAgain}
             disabled={isLoading}
           >
-            Adjust Formatting
+            Analyze Again
           </button>
         )}
       </div>

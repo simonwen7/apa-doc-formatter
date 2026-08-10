@@ -3,6 +3,12 @@ import DocumentInputPanel from "./components/DocumentInputPanel";
 import HeroSection from "./components/HeroSection";
 import HowItWorks from "./components/HowItWorks";
 import PaperSetupPanel from "./components/PaperSetupPanel";
+import {
+  getFormattingScoreLabel,
+  getFormattingScoreTone,
+  normalizeAnalysisResponse,
+  normalizeFixResponse,
+} from "./utils/normalizeAnalysisResponse";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL ||
@@ -46,6 +52,7 @@ const FIX_LABELS = {
   reference_space_after: "Reference spacing after corrected",
   headings_touched: "Headings formatted",
   text_normalized: "Text inconsistencies normalized",
+  safe_rules_applied: "Supported formatting rules applied",
 };
 
 function formatFileSize(bytes) {
@@ -94,28 +101,20 @@ function FormatterApp() {
     }
   }, [analyzeResult, fixResult, loadingAction]);
 
-  const issueCount = Number(analyzeResult?.summary?.issue_count ?? 0);
-  const score = Math.max(
-    0,
-    Math.min(100, Number(analyzeResult?.summary?.score ?? 0))
+  const analysis = useMemo(
+    () => (analyzeResult ? normalizeAnalysisResponse(analyzeResult) : null),
+    [analyzeResult]
   );
 
-  const groupedIssues = useMemo(() => {
-    if (!analyzeResult?.issues?.length) {
-      return {};
-    }
+  const fixModel = useMemo(
+    () => (fixResult ? normalizeFixResponse(fixResult) : null),
+    [fixResult]
+  );
 
-    return analyzeResult.issues.reduce((groups, issue) => {
-      const category = issue.category || "Other";
-
-      if (!groups[category]) {
-        groups[category] = [];
-      }
-
-      groups[category].push(issue);
-      return groups;
-    }, {});
-  }, [analyzeResult]);
+  const safeCount = analysis?.safeCount ?? 0;
+  const score = analysis?.formattingScore ?? 0;
+  const scoreLabel = getFormattingScoreLabel(score);
+  const scoreTone = getFormattingScoreTone(score);
 
   const visibleFixedCounts = useMemo(() => {
     if (!fixResult?.fixed_counts) {
@@ -135,20 +134,6 @@ function FormatterApp() {
     (total, item) => total + item.value,
     0
   );
-
-  const getScoreLabel = () => {
-    if (score >= 90) return "Excellent";
-    if (score >= 70) return "Good";
-    if (score >= 40) return "Needs improvement";
-    return "Significant formatting changes needed";
-  };
-
-  const getScoreTone = () => {
-    if (score >= 90) return "excellent";
-    if (score >= 70) return "good";
-    if (score >= 40) return "warning";
-    return "poor";
-  };
 
   const resetResults = () => {
     setAnalyzeResult(null);
@@ -226,6 +211,7 @@ function FormatterApp() {
 
     setLoadingAction("analyze");
     setError("");
+    // Replace stale analysis completely — do not append.
     setAnalyzeResult(null);
     setFixResult(null);
     setActiveTab("preview");
@@ -271,6 +257,11 @@ function FormatterApp() {
       return;
     }
 
+    if (!analysis?.canFix) {
+      setError("There are no formatting issues Forma APA can safely fix.");
+      return;
+    }
+
     setLoadingAction("fix");
     setError("");
     setFixResult(null);
@@ -298,7 +289,14 @@ function FormatterApp() {
         );
       }
 
+      const normalized = normalizeFixResponse(data);
       setFixResult(data);
+
+      if (!normalized.formattingSucceeded) {
+        setError(
+          "We couldn't safely finish formatting this document. Your original document has not been changed."
+        );
+      }
     } catch (requestError) {
       setError(
         requestError.message ||
@@ -311,18 +309,18 @@ function FormatterApp() {
   };
 
   const getDownloadUrl = () => {
-    if (!fixResult?.download_url) {
+    if (!fixModel?.formattingSucceeded || !fixModel?.downloadUrl) {
       return null;
     }
 
     if (
-      fixResult.download_url.startsWith("http://") ||
-      fixResult.download_url.startsWith("https://")
+      fixModel.downloadUrl.startsWith("http://") ||
+      fixModel.downloadUrl.startsWith("https://")
     ) {
-      return fixResult.download_url;
+      return fixModel.downloadUrl;
     }
 
-    return `${API_BASE}${fixResult.download_url}`;
+    return `${API_BASE}${fixModel.downloadUrl}`;
   };
 
   const downloadUrl = getDownloadUrl();
@@ -362,7 +360,8 @@ function FormatterApp() {
             file={file}
             analyzeResult={analyzeResult}
             fixResult={fixResult}
-            issueCount={issueCount}
+            safeCount={safeCount}
+            canFix={Boolean(analysis?.canFix)}
             loadingAction={loadingAction}
           />
 
@@ -376,12 +375,11 @@ function FormatterApp() {
             error={error}
             loadingAction={loadingAction}
             analyzeResult={analyzeResult}
+            analysis={analysis}
             fixResult={fixResult}
-            issueCount={issueCount}
-            score={score}
-            scoreLabel={getScoreLabel()}
-            scoreTone={getScoreTone()}
-            groupedIssues={groupedIssues}
+            fixModel={fixModel}
+            scoreLabel={scoreLabel}
+            scoreTone={scoreTone}
             visibleFixedCounts={visibleFixedCounts}
             totalFixed={totalFixed}
             downloadUrl={downloadUrl}
