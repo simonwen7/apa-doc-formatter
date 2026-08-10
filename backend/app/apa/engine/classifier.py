@@ -40,6 +40,136 @@ def _normalize(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 
 
+def _is_exact_apa_references_heading(text: str) -> bool:
+    return _normalize(text) == "references"
+
+
+def _is_reference_section_label(text: str) -> bool:
+    """
+    Detect reference-section labels, including common nonstandard variants.
+
+    Heading text correctness (must be exactly "References") is separate from
+    region detection — following bibliography paragraphs may still be classified
+    as REFERENCE_ENTRY when structural confidence is sufficient.
+    """
+    norm = _normalize(text)
+    if not norm or len(norm) > 80:
+        return False
+    if _is_exact_apa_references_heading(norm):
+        return True
+
+    # Reject instructional / body prose that merely mentions "reference".
+    if norm.startswith("please ") or "instruction" in norm or "assignment" in norm:
+        return False
+    if len(norm.split()) > 8:
+        return False
+
+    exact_variants = {
+        "works cited",
+        "works cited/references",
+        "works cited / references",
+        "references/works cited",
+        "references / works cited",
+        "bibliography",
+        "reference list",
+        "reference",
+        "works cited references",
+        "cited references",
+    }
+    if norm in exact_variants:
+        return True
+
+    if re.search(r"\bworks\s+cited\b", norm) and len(norm.split()) <= 6:
+        return True
+    if re.search(r"\breferences?\b", norm) and len(norm.split()) <= 6:
+        return True
+    if re.search(r"\bbibliography\b", norm) and len(norm.split()) <= 4:
+        return True
+    return False
+
+
+def _bibliography_signal_score(text: str) -> int:
+    """Multi-signal strength for a single bibliography-shaped paragraph."""
+    t = (text or "").strip()
+    if not t or len(t) < 20:
+        return 0
+    score = 0
+    if re.search(r"\((\d{4}[a-z]?|n\.d\.)\)", t):
+        score += 2
+    if re.search(r"10\.\d{4,9}/", t):
+        score += 2
+    if re.search(r"https?://", t, re.I):
+        score += 1
+    if re.match(r"^[A-Z][^.]{1,80},\s*[A-Z]\.", t):
+        score += 2
+    if re.search(r"\b(journal|press|doi|retrieved|ed\.|vols?\.)\b", t, re.I):
+        score += 1
+    return score
+
+
+def _find_reference_region_start(paragraphs: list[Paragraph]) -> Optional[int]:
+    """
+    Locate the start of a reference region using multiple conservative signals.
+
+    Prefer an explicit section label (including nonstandard Works Cited/References).
+    Fall back to a terminal cluster of bibliography-shaped paragraphs near the end.
+    """
+    n = len(paragraphs)
+    if n == 0:
+        return None
+
+    label_idx: Optional[int] = None
+    for index, paragraph in enumerate(paragraphs):
+        text = (paragraph.text or "").strip()
+        if not text:
+            continue
+        if not _is_reference_section_label(text):
+            continue
+        style = _safe_style_name(paragraph).lower()
+        style_level = _style_heading_level(style)
+        near_end = index >= max(0, n - max(12, n // 3))
+        if style_level is not None or near_end or index > n // 2:
+            label_idx = index
+    if label_idx is not None:
+        return label_idx
+
+    # Structural fallback: ≥3 consecutive strong bibliography paragraphs near end.
+    start_scan = max(0, n - max(20, n // 2))
+    best_start: Optional[int] = None
+    run_start: Optional[int] = None
+    run_len = 0
+    for index in range(start_scan, n):
+        text = (paragraphs[index].text or "").strip()
+        if not text:
+            continue
+        if _bibliography_signal_score(text) >= 2:
+            if run_start is None:
+                run_start = index
+                run_len = 1
+            else:
+                run_len += 1
+            if run_len >= 3:
+                best_start = run_start
+        else:
+            run_start = None
+            run_len = 0
+    if best_start is None:
+        return None
+    for back in range(best_start - 1, max(-1, best_start - 4), -1):
+        if back < 0:
+            break
+        prev = (paragraphs[back].text or "").strip()
+        if not prev:
+            continue
+        if len(prev) <= 80 and (
+            _is_reference_section_label(prev)
+            or _style_heading_level(_safe_style_name(paragraphs[back])) is not None
+        ):
+            return back
+        break
+    return best_start
+
+
 def _outline_level(paragraph: Paragraph) -> Optional[int]:
     try:
         level = paragraph.paragraph_format.outline_level
@@ -142,13 +272,11 @@ def _looks_like_person_name(text: str) -> bool:
 
 
 def _find_section_markers(paragraphs: list[Paragraph]) -> dict:
-    ref_start = None
+    ref_start = _find_reference_region_start(paragraphs)
     abstract_idx = None
     keywords_idx = None
     for index, paragraph in enumerate(paragraphs):
         norm = _normalize(paragraph.text)
-        if ref_start is None and norm == "references":
-            ref_start = index
         if abstract_idx is None and norm == "abstract":
             abstract_idx = index
         if keywords_idx is None and _looks_like_keywords_label(paragraph.text):
@@ -221,7 +349,7 @@ def _detect_body_start(
             text = paragraph.text.strip()
             if not text:
                 continue
-            if _normalize(text) == "references":
+            if _is_reference_section_label(text):
                 continue
             style_level = _style_heading_level(style)
             if style_level is not None:
@@ -390,16 +518,29 @@ def classify_document(doc: Document) -> list[ClassifiedParagraph]:
             confidence = 0.9
             evidence.append("empty")
         elif ref_start is not None and index == ref_start:
-            region = Region.REFERENCES_HEADING
-            confidence = 0.99
-            heading_level = 1
-            evidence.append("references_label")
+            # Heading may be nonstandard ("Works Cited/References"); still a
+            # references region marker. Text correctness is AUTHOR, not SAFE.
+            if _is_reference_section_label(stripped):
+                region = Region.REFERENCES_HEADING
+                confidence = 0.99
+                heading_level = 1
+                if _is_exact_apa_references_heading(stripped):
+                    evidence.append("references_label")
+                else:
+                    evidence.append("nonstandard_references_label")
+            else:
+                # Structural cluster start without a label paragraph.
+                region = Region.REFERENCE_ENTRY
+                confidence = 0.9
+                evidence.append("reference_cluster_start")
         elif ref_start is not None and index > ref_start:
             if _normalize(stripped).startswith("appendix"):
                 region = Region.APPENDIX
                 confidence = 0.95
                 evidence.append("appendix_after_references")
-            elif _looks_like_reference_entry(stripped):
+            elif _looks_like_reference_entry(stripped) or _bibliography_signal_score(
+                stripped
+            ) >= 2:
                 region = Region.REFERENCE_ENTRY
                 confidence = 0.97
                 evidence.append("after_references_pattern")

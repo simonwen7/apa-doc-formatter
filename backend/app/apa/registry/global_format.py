@@ -8,12 +8,14 @@ from app.apa.registry.base import BaseRule, RuleContext
 from app.apa.registry.formatting import (
     clear_extra_paragraph_spacing,
     first_line_indent_inches,
+    is_apa_valid_typography,
     is_fully_justified,
     is_left_aligned_or_default,
     line_spacing_is_double,
     set_double_spacing,
     set_first_line_indent,
     set_left_aligned,
+    set_runs_apa_font,
     space_after_pt,
     space_before_pt,
 )
@@ -43,6 +45,16 @@ SOURCE_INDENT = SourceRef(
     official_resource="APA Style Student Paper Setup Guide; Publication Manual (7th ed.), Paragraph Indentation",
     publication_manual_section=None,
     notes="Indent the first line of every paragraph 0.5 in.",
+    source_verified=True,
+)
+
+SOURCE_FONT = SourceRef(
+    official_resource="APA Style Student Paper Setup Guide; Publication Manual (7th ed.), Font",
+    publication_manual_section=None,
+    notes=(
+        "Use an APA-accessible font (e.g., Times New Roman 12, Arial 11, Calibri 11). "
+        "Font family/size changes are formatting-only."
+    ),
     source_verified=True,
 )
 
@@ -99,8 +111,6 @@ def _detect_double_spacing(context: RuleContext) -> list[Issue]:
     issues: list[Issue] = []
     for item in _body_paras(context):
         result = line_spacing_is_double(item.paragraph)
-        if result is None:
-            continue  # uncertain — do not report definite error
         if result is False:
             issues.append(
                 Issue(
@@ -108,13 +118,38 @@ def _detect_double_spacing(context: RuleContext) -> list[Issue]:
                     category="Body",
                     message=f"Paragraph {item.index} should be double-spaced.",
                     expected="double (2.0)",
-                    actual="not double",
+                    actual="not double (effective)",
                     location=f"paragraph[{item.index}]",
                     severity=Severity.ERROR,
                     fixability=Fixability.SAFE_AUTO_FIX,
                     can_fix=True,
                     confidence=min(item.confidence, 0.96),
                     source=SOURCE_SPACING,
+                    paragraph_index=item.index,
+                    region=Region.BODY,
+                )
+            )
+        elif result is None:
+            # Unresolved inherited spacing is NOT compliant — do not silent-pass.
+            issues.append(
+                Issue(
+                    rule_id="APA7-GLOBAL-004-UNRESOLVED",
+                    category="Body",
+                    message=(
+                        f"Paragraph {item.index} line spacing could not be "
+                        "verified from direct or style inheritance."
+                    ),
+                    expected="verified double (2.0)",
+                    actual="unresolved effective spacing",
+                    location=f"paragraph[{item.index}]",
+                    severity=Severity.WARNING,
+                    fixability=Fixability.CONDITIONAL,
+                    can_fix=False,
+                    confidence=min(item.confidence, 0.7),
+                    source=SOURCE_SPACING,
+                    reason_not_fixable=(
+                        "Effective line spacing could not be resolved confidently."
+                    ),
                     paragraph_index=item.index,
                     region=Region.BODY,
                 )
@@ -283,6 +318,44 @@ def _fix_first_line_indent(context: RuleContext, issue: Issue) -> bool:
     if issue.paragraph_index is None:
         return False
     set_first_line_indent(context.doc.paragraphs[issue.paragraph_index])
+    return True
+
+
+def _detect_body_font(context: RuleContext) -> list[Issue]:
+    issues: list[Issue] = []
+    for item in _body_paras(context):
+        validity = is_apa_valid_typography(item.paragraph)
+        # Only report confident violations. Unresolved theme/default fonts are
+        # common in python-docx and must not flood CONDITIONAL noise; spacing
+        # unresolved rules already prevent false score-100 for inheritance gaps.
+        if validity is False:
+            issues.append(
+                Issue(
+                    rule_id="APA7-GLOBAL-FONT",
+                    category="Body",
+                    message=(
+                        f"Paragraph {item.index} uses a font that is not on the "
+                        "APA-accessible allowlist."
+                    ),
+                    expected="APA-accessible font (e.g., Times New Roman 12)",
+                    actual="invalid effective font",
+                    location=f"paragraph[{item.index}]",
+                    severity=Severity.ERROR,
+                    fixability=Fixability.SAFE_AUTO_FIX,
+                    can_fix=True,
+                    confidence=min(item.confidence, 0.95),
+                    source=SOURCE_FONT,
+                    paragraph_index=item.index,
+                    region=Region.BODY,
+                )
+            )
+    return issues
+
+
+def _fix_body_font(context: RuleContext, issue: Issue) -> bool:
+    if issue.paragraph_index is None:
+        return False
+    set_runs_apa_font(context.doc.paragraphs[issue.paragraph_index])
     return True
 
 
@@ -598,5 +671,24 @@ RULES = [
         production_supported=True,
         fixer_implemented=False,
         detector_test=True,
+    ),
+    BaseRule(
+        rule_id="APA7-GLOBAL-FONT",
+        category="Body",
+        description="Body text uses an APA-accessible font and size.",
+        official_expectation="APA-accessible font (e.g., Times New Roman 12)",
+        source=SOURCE_FONT,
+        fixability=Fixability.SAFE_AUTO_FIX,
+        applicable_regions=("BODY",),
+        detector=_detect_body_font,
+        fixer=_fix_body_font,
+        minimum_confidence=0.85,
+        production_supported=True,
+        fixer_implemented=True,
+        detector_test=True,
+        fixer_test=True,
+        post_fix_test=True,
+        text_integrity_test=True,
+        idempotency_test=True,
     ),
 ]

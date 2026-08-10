@@ -12,6 +12,7 @@ from app.apa.registry.formatting import (
     first_line_indent_inches,
     is_centered,
     is_left_aligned_or_default,
+    is_non_default_text_color,
     set_centered,
     set_left_aligned,
     set_level4_or_5_indent,
@@ -514,6 +515,53 @@ def _detect_low_confidence_heading(context: RuleContext) -> list[Issue]:
     return issues
 
 
+def _detect_heading_nonstandard_color(context: RuleContext) -> list[Issue]:
+    """Surface decorative/non-black heading color conservatively (not SAFE)."""
+    issues: list[Issue] = []
+    heading_regions = {
+        Region.HEADING,
+        Region.LEVEL_1_HEADING,
+        Region.LEVEL_2_HEADING,
+        Region.LEVEL_3_HEADING,
+        Region.LEVEL_4_HEADING,
+        Region.LEVEL_5_HEADING,
+        Region.BODY_TITLE,
+    }
+    for item in context.classified:
+        if item.region not in heading_regions or not item.text.strip():
+            continue
+        if item.confidence < 0.85:
+            continue
+        colored = is_non_default_text_color(item.paragraph)
+        if colored is True:
+            issues.append(
+                Issue(
+                    rule_id="APA7-HEADING-COLOR",
+                    category="Headings",
+                    message=(
+                        f"Heading paragraph {item.index} uses non-standard text color. "
+                        "APA student papers typically use black text; instructor "
+                        "templates may intentionally use color."
+                    ),
+                    expected="standard black text (or instructor-approved styling)",
+                    actual="non-default effective text color",
+                    location=f"paragraph[{item.index}]",
+                    severity=Severity.WARNING,
+                    fixability=Fixability.CONDITIONAL,
+                    can_fix=False,
+                    confidence=min(item.confidence, 0.85),
+                    source=SOURCE_HEADINGS,
+                    reason_not_fixable=(
+                        "Automatic color normalization may conflict with instructor "
+                        "template requirements."
+                    ),
+                    paragraph_index=item.index,
+                    region=item.region,
+                )
+            )
+    return issues
+
+
 def _fix_center(context: RuleContext, issue: Issue) -> bool:
     if issue.paragraph_index is None:
         return False
@@ -833,6 +881,28 @@ RULES = [
         detector=_detect_low_confidence_heading,
         fixer=None,
         production_supported=False,
+        detector_test=True,
+    ),
+    BaseRule(
+        rule_id="APA7-HEADING-COLOR",
+        category="Headings",
+        description="Non-standard heading text color is surfaced conservatively.",
+        official_expectation="Black text unless instructor template requires otherwise",
+        source=SOURCE_HEADINGS,
+        fixability=Fixability.CONDITIONAL,
+        applicable_regions=(
+            "HEADING",
+            "LEVEL_1_HEADING",
+            "LEVEL_2_HEADING",
+            "LEVEL_3_HEADING",
+            "LEVEL_4_HEADING",
+            "LEVEL_5_HEADING",
+            "BODY_TITLE",
+        ),
+        detector=_detect_heading_nonstandard_color,
+        fixer=None,
+        production_supported=True,
+        fixer_implemented=False,
         detector_test=True,
     ),
 ]

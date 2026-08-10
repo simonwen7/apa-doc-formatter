@@ -5,6 +5,7 @@ from app.apa.registry.base import BaseRule, RuleContext
 from app.apa.registry.formatting import (
     clear_extra_paragraph_spacing,
     effective_bold,
+    is_apa_valid_typography,
     is_centered,
     is_hanging_indent,
     line_spacing_is_double,
@@ -14,6 +15,7 @@ from app.apa.registry.formatting import (
     set_flush_left_no_first_indent,
     set_hanging_indent,
     set_page_break_before,
+    set_runs_apa_font,
     set_runs_bold,
     space_after_pt,
     space_before_pt,
@@ -51,13 +53,37 @@ def _detect_ref_double_spacing(context: RuleContext) -> list[Issue]:
                     category="References",
                     message=f"Reference paragraph {item.index} should be double-spaced.",
                     expected="double (2.0)",
-                    actual="not double",
+                    actual="not double (effective)",
                     location=f"paragraph[{item.index}]",
                     severity=Severity.ERROR,
                     fixability=Fixability.SAFE_AUTO_FIX,
                     can_fix=True,
                     confidence=min(item.confidence, 0.97),
                     source=SOURCE_REFS,
+                    paragraph_index=item.index,
+                    region=Region.REFERENCE_ENTRY,
+                )
+            )
+        elif result is None:
+            issues.append(
+                Issue(
+                    rule_id="APA7-REFERENCE-005-UNRESOLVED",
+                    category="References",
+                    message=(
+                        f"Reference paragraph {item.index} line spacing could not "
+                        "be verified from direct or style inheritance."
+                    ),
+                    expected="verified double (2.0)",
+                    actual="unresolved effective spacing",
+                    location=f"paragraph[{item.index}]",
+                    severity=Severity.WARNING,
+                    fixability=Fixability.CONDITIONAL,
+                    can_fix=False,
+                    confidence=min(item.confidence, 0.7),
+                    source=SOURCE_REFS,
+                    reason_not_fixable=(
+                        "Effective reference line spacing could not be resolved."
+                    ),
                     paragraph_index=item.index,
                     region=Region.REFERENCE_ENTRY,
                 )
@@ -144,6 +170,41 @@ def _fix_hanging_indent(context: RuleContext, issue: Issue) -> bool:
     return True
 
 
+def _detect_ref_font(context: RuleContext) -> list[Issue]:
+    issues: list[Issue] = []
+    for item in _ref_entries(context):
+        validity = is_apa_valid_typography(item.paragraph)
+        if validity is False:
+            issues.append(
+                Issue(
+                    rule_id="APA7-REFERENCE-FONT",
+                    category="References",
+                    message=(
+                        f"Reference paragraph {item.index} uses a font that is "
+                        "not on the APA-accessible allowlist."
+                    ),
+                    expected="APA-accessible font (e.g., Times New Roman 12)",
+                    actual="invalid effective font",
+                    location=f"paragraph[{item.index}]",
+                    severity=Severity.ERROR,
+                    fixability=Fixability.SAFE_AUTO_FIX,
+                    can_fix=True,
+                    confidence=min(item.confidence, 0.95),
+                    source=SOURCE_REFS,
+                    paragraph_index=item.index,
+                    region=Region.REFERENCE_ENTRY,
+                )
+            )
+    return issues
+
+
+def _fix_ref_font(context: RuleContext, issue: Issue) -> bool:
+    if issue.paragraph_index is None:
+        return False
+    set_runs_apa_font(context.doc.paragraphs[issue.paragraph_index])
+    return True
+
+
 def _detect_flush_first_line(context: RuleContext) -> list[Issue]:
     """
     APA7-REFERENCE-009: first line flush left is implied by hanging indent.
@@ -152,6 +213,48 @@ def _detect_flush_first_line(context: RuleContext) -> list[Issue]:
     # Avoid duplicate user-facing noise when 008 already covers the same root cause.
     # Detector returns empty; rule remains registered for coverage metadata.
     return []
+
+
+def _detect_refs_heading_text(context: RuleContext) -> list[Issue]:
+    """
+    Nonstandard reference-section heading text requires author revision.
+
+    Never rewrite heading characters automatically. Region classification still
+    treats the paragraph as REFERENCES_HEADING so entry formatting can proceed.
+    """
+    issues: list[Issue] = []
+    for item in context.classified:
+        if item.region != Region.REFERENCES_HEADING or item.confidence < 0.95:
+            continue
+        text = (item.text or "").strip()
+        if not text:
+            continue
+        if text == "References":
+            continue
+        issues.append(
+            Issue(
+                rule_id="APA7-REFERENCE-HEADING-TEXT",
+                category="References",
+                message=(
+                    'Reference-section heading text should be exactly "References". '
+                    "Please revise the heading wording; Forma will not rewrite it."
+                ),
+                expected="References",
+                actual=text[:80],
+                location=f"paragraph[{item.index}]",
+                severity=Severity.WARNING,
+                fixability=Fixability.AUTHOR_ACTION_REQUIRED,
+                can_fix=False,
+                confidence=min(item.confidence, 0.98),
+                source=SOURCE_REFS,
+                reason_not_fixable=(
+                    "Changing heading characters alters authored text."
+                ),
+                paragraph_index=item.index,
+                region=Region.REFERENCES_HEADING,
+            )
+        )
+    return issues
 
 
 def _detect_refs_new_page(context: RuleContext) -> list[Issue]:
@@ -290,6 +393,22 @@ def _detect_alpha_order(context: RuleContext) -> list[Issue]:
 
 
 RULES = [
+    BaseRule(
+        rule_id="APA7-REFERENCE-HEADING-TEXT",
+        category="References",
+        description='Reference-section heading text must be exactly "References".',
+        official_expectation='Heading text "References" (never auto-rewritten)',
+        source=SOURCE_REFS,
+        fixability=Fixability.AUTHOR_ACTION_REQUIRED,
+        applicable_regions=("REFERENCES_HEADING",),
+        detector=_detect_refs_heading_text,
+        fixer=None,
+        production_supported=True,
+        fixer_implemented=False,
+        detector_test=True,
+        text_integrity_test=True,
+        idempotency_test=True,
+    ),
     BaseRule(
         rule_id="APA7-REFERENCE-001",
         category="References",
@@ -447,6 +566,24 @@ RULES = [
         fixer=_fix_hanging_indent,
         production_supported=False,  # deduped into 008 for user-facing issues
         fixer_implemented=True,
+    ),
+    BaseRule(
+        rule_id="APA7-REFERENCE-FONT",
+        category="References",
+        description="Reference entries use an APA-accessible font and size.",
+        official_expectation="APA-accessible font (e.g., Times New Roman 12)",
+        source=SOURCE_REFS,
+        fixability=Fixability.SAFE_AUTO_FIX,
+        applicable_regions=("REFERENCE_ENTRY",),
+        detector=_detect_ref_font,
+        fixer=_fix_ref_font,
+        production_supported=True,
+        fixer_implemented=True,
+        detector_test=True,
+        fixer_test=True,
+        post_fix_test=True,
+        text_integrity_test=True,
+        idempotency_test=True,
     ),
     BaseRule(
         rule_id="APA7-REFERENCE-ALPHA",

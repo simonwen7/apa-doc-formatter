@@ -21,5 +21,9 @@ APA_VALID_FONTS = {
     ("computer modern", 10),
 }
 
+# Canonical SAFE fallback when confidently normalizing invalid fonts.
+DEFAULT_APA_FONT_NAME = "Times New Roman"
+DEFAULT_APA_FONT_SIZE_PT = 12
+
 DEFAULT_SAFE_CONFIDENCE = 0.95
 HIGH_SAFE_CONFIDENCE = 0.99

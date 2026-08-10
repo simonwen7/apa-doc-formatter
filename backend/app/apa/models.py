@@ -18,6 +18,14 @@ class Severity(str, Enum):
     ERROR = "error"
 
 
+class FormattingVerificationStatus(str, Enum):
+    """Separates SAFE=0 (no SAFE violations) from verification completeness."""
+
+    VERIFIED_FORMATTING = "VERIFIED_FORMATTING"
+    PARTIALLY_VERIFIED_FORMATTING = "PARTIALLY_VERIFIED_FORMATTING"
+    UNVERIFIED_FORMATTING = "UNVERIFIED_FORMATTING"
+
+
 class Region(str, Enum):
     TITLE_PAGE = "TITLE_PAGE"
     PAPER_TITLE = "PAPER_TITLE"
@@ -177,6 +185,10 @@ class AnalysisResult:
     author_action_required: list[Issue] = field(default_factory=list)
     uncertain: list[Issue] = field(default_factory=list)
     unsupported: list[Issue] = field(default_factory=list)
+    # Major applicable formatting checks whose effective values were resolved
+    # (compliant or violation). Unresolved checks are counted separately.
+    verified_formatting_check_count: int = 0
+    unresolved_formatting_check_count: int = 0
 
     @property
     def safe_fix_count(self) -> int:
@@ -187,14 +199,65 @@ class AnalysisResult:
         return len(self.author_action_required)
 
     @property
+    def formatting_verification_status(self) -> FormattingVerificationStatus:
+        verified = self.verified_formatting_check_count
+        unresolved = self.unresolved_formatting_check_count
+        applicable = verified + unresolved
+        if applicable == 0 or verified == 0:
+            return FormattingVerificationStatus.UNVERIFIED_FORMATTING
+        if unresolved == 0:
+            return FormattingVerificationStatus.VERIFIED_FORMATTING
+        return FormattingVerificationStatus.PARTIALLY_VERIFIED_FORMATTING
+
+    @property
+    def formatting_verification_coverage(self) -> float:
+        applicable = (
+            self.verified_formatting_check_count
+            + self.unresolved_formatting_check_count
+        )
+        if applicable <= 0:
+            return 0.0
+        return self.verified_formatting_check_count / applicable
+
+    @property
     def formatting_compliance_score(self) -> int:
         """FORMATTING compliance only (not overall APA correctness).
 
-        Score decreases solely with outstanding SAFE_AUTO_FIX issues.
-        AUTHOR_ACTION_REQUIRED / CONDITIONAL / UNSUPPORTED issues do not
-        reduce this score and must not be presented as "APA perfect."
+        Formula (documented, not an arbitrary cap):
+          base = max(0, 100 - 2 * SAFE_AUTO_FIX_count)
+          coverage = verified_applicable / (verified_applicable + unresolved_applicable)
+          score = round(base * coverage) when applicable checks exist, else base.
+
+        Unresolved major formatting properties therefore cannot count as compliant,
+        so SAFE=0 with large unresolved coverage cannot yield a near-perfect score.
+        SAFE=0 still only means no remaining SAFE_AUTO_FIX violations.
         """
-        return max(0, 100 - self.safe_fix_count * 2)
+        base = max(0, 100 - self.safe_fix_count * 2)
+        applicable = (
+            self.verified_formatting_check_count
+            + self.unresolved_formatting_check_count
+        )
+        if applicable <= 0:
+            # No major checks evaluated — do not imply verified completeness.
+            if self._unresolved_formatting_issue_count() > 0:
+                return min(base, 70)
+            return base
+        coverage = self.formatting_verification_coverage
+        score = int(round(base * coverage))
+        if self.unresolved_formatting_check_count > 0:
+            # Explicitly prevent a perfect score while anything major is unresolved.
+            score = min(score, 99)
+        return max(0, min(100, score))
+
+    def _unresolved_formatting_issue_count(self) -> int:
+        return sum(
+            1
+            for issue in self.uncertain
+            if "UNRESOLVED" in issue.rule_id
+            or "unresolved" in (issue.actual or "").lower()
+            or "INSTRUCTOR_TEMPLATE" in issue.rule_id
+            or issue.rule_id == "APA7-HEADING-COLOR"
+        )
 
     @property
     def citation_warning_count(self) -> int:
@@ -257,6 +320,13 @@ class AnalysisResult:
                 "issue_count": self.safe_fix_count + self.author_action_count,
                 # Explicit naming so clients do not treat score as overall APA correctness.
                 "score_scope": "formatting_safe_auto_fix_only",
+                # Verification completeness (SAFE=0 ≠ fully verified formatting).
+                "formatting_verification_status": self.formatting_verification_status.value,
+                "verified_check_count": self.verified_formatting_check_count,
+                "unresolved_check_count": self.unresolved_formatting_check_count,
+                "formatting_verification_coverage": round(
+                    self.formatting_verification_coverage, 4
+                ),
             },
             # Compatibility: existing UI groups by category/message.
             "issues": legacy_issues,

@@ -9,6 +9,7 @@ from app.apa.registry.base import BaseRule, RuleContext
 from app.apa.registry.formatting import (
     effective_bold,
     is_centered,
+    is_non_default_text_color,
     line_spacing_is_double,
     set_centered,
     set_double_spacing,
@@ -428,6 +429,74 @@ def _meta_detector(rule_id: str):
     return _detect
 
 
+def _detect_instructor_template_title_page(context: RuleContext) -> list[Issue]:
+    """
+    Distinguish decorative/instructor template title pages from standard APA.
+
+    Does not invent or delete content. Surfaces CONDITIONAL so score cannot
+    claim perfect APA formatting when template styling remains.
+    """
+    title_items = [
+        item
+        for item in context.classified
+        if item.region in {Region.TITLE_PAGE, Region.PAPER_TITLE} and item.text.strip()
+    ]
+    if not title_items:
+        return []
+
+    signals = 0
+    for item in title_items:
+        if is_non_default_text_color(item.paragraph) is True:
+            signals += 1
+        for run in item.paragraph.runs:
+            if not (run.text and run.text.strip()):
+                continue
+            try:
+                if run.font.size and run.font.size.pt and run.font.size.pt >= 18:
+                    signals += 1
+                    break
+            except Exception:
+                pass
+        try:
+            shading = item.paragraph._p.find(
+                "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr"
+            )
+            if shading is not None and shading.find(
+                "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}shd"
+            ) is not None:
+                signals += 1
+        except Exception:
+            pass
+
+    # Heuristic: multiple decorative signals → instructor/template page.
+    if signals < 2:
+        return []
+
+    return [
+        Issue(
+            rule_id="APA7-TITLE-INSTRUCTOR-TEMPLATE",
+            category="Title Page",
+            message=(
+                "Title page appears to use an instructor/template layout "
+                "(decorative color, oversized text, or shaded banner). "
+                "Instructor requirements may supersede APA title-page formatting."
+            ),
+            expected="STANDARD_APA_TITLE_PAGE or instructor-approved template",
+            actual="INSTRUCTOR_TEMPLATE",
+            location="title_page",
+            severity=Severity.WARNING,
+            fixability=Fixability.CONDITIONAL,
+            can_fix=False,
+            confidence=0.8,
+            source=SOURCE_TITLE,
+            reason_not_fixable=(
+                "Do not invent title-page fields or delete instructor-provided template text."
+            ),
+            region=Region.TITLE_PAGE,
+        )
+    ]
+
+
 _SAFE_FLAGS = dict(
     production_supported=True,
     fixer_implemented=True,
@@ -597,6 +666,20 @@ RULES = [
         detector=_meta_detector("APA7-TITLE-015"),
         fixer=None,
         production_supported=True,
+        detector_test=True,
+    ),
+    BaseRule(
+        rule_id="APA7-TITLE-INSTRUCTOR-TEMPLATE",
+        category="Title Page",
+        description="Detect decorative instructor/template title pages conservatively.",
+        official_expectation="STANDARD_APA_TITLE_PAGE or instructor-approved template",
+        source=SOURCE_TITLE,
+        fixability=Fixability.CONDITIONAL,
+        applicable_regions=("TITLE_PAGE", "PAPER_TITLE"),
+        detector=_detect_instructor_template_title_page,
+        fixer=None,
+        production_supported=True,
+        fixer_implemented=False,
         detector_test=True,
     ),
 ]
