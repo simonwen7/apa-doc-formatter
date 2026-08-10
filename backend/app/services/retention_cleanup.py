@@ -50,6 +50,7 @@ def cleanup_expired_fixed_documents(
     retention_hours: int | None = None,
     now: float | None = None,
     objects: list[StoredFixedObject] | None = None,
+    oidc_token: str | None = None,
 ) -> CleanupReport:
     """
     Delete expired owner-scoped fixed documents.
@@ -69,7 +70,11 @@ def cleanup_expired_fixed_documents(
     report = CleanupReport(retention_hours=hours)
 
     try:
-        candidates = list_fixed_objects() if objects is None else objects
+        candidates = (
+            list_fixed_objects(oidc_token=oidc_token)
+            if objects is None
+            else objects
+        )
     except Exception as exc:
         logger.exception("cleanup_list_failed")
         report.errors.append(f"list_failed:{type(exc).__name__}")
@@ -88,7 +93,11 @@ def cleanup_expired_fixed_documents(
 
         report.expired += 1
         try:
-            ok = delete_fixed_document(obj.user_id, obj.document_id)
+            ok = delete_fixed_document(
+                obj.user_id,
+                obj.document_id,
+                oidc_token=oidc_token,
+            )
             if ok:
                 report.deleted += 1
             else:

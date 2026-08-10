@@ -70,7 +70,8 @@ Blob variables are not required locally (`USE_BLOB_STORAGE` is false unless `VER
 | `DOCUMENT_DOWNLOAD_TOKEN_TTL_SECONDS` | Optional | No | Default 3600 |
 | `DOCUMENT_RETENTION_HOURS` | Optional | No | Default 24 |
 | `VERCEL` | Injected | — | Platform sets `1` |
-| `VERCEL_OIDC_TOKEN` | Injected when OIDC enabled | — | Short-lived |
+| `VERCEL_OIDC_TOKEN` | Builds / `vercel env pull` | — | Not the primary Function-runtime source |
+| Function header `x-vercel-oidc-token` | Injected on each Function request when OIDC is enabled | — | Used for Private Blob put/get/delete |
 
 `vercel.json` declares a once-daily cron (Hobby-compatible): `0 5 * * *` (05:00 UTC)
 → `GET /internal/cleanup-fixed-documents`.

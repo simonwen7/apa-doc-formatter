@@ -97,11 +97,19 @@ def _write_local_meta(user_id: str, document_id: str, created_at: float) -> None
     )
 
 
-def save_fixed_document(user_id: str, document_id: str, source_path: Path) -> str:
+def save_fixed_document(
+    user_id: str,
+    document_id: str,
+    source_path: Path,
+    *,
+    oidc_token: str | None = None,
+) -> str:
     """
     Persist a fixed DOCX under the verified owner's namespace.
 
     Returns the logical pathname (never a host filesystem path or Blob URL).
+    `oidc_token` is Vercel infrastructure auth from `x-vercel-oidc-token`
+    (never the Supabase user Bearer).
     """
     if not source_path.exists():
         raise HTTPException(
@@ -113,7 +121,13 @@ def save_fixed_document(user_id: str, document_id: str, source_path: Path) -> st
     created_at = time.time()
 
     if USE_BLOB_STORAGE:
-        return _save_fixed_to_blob(user_id, document_id, source_path, created_at)
+        return _save_fixed_to_blob(
+            user_id,
+            document_id,
+            source_path,
+            created_at,
+            oidc_token=oidc_token,
+        )
 
     FIXED_DIR.mkdir(parents=True, exist_ok=True)
     destination = temp_fixed_path(user_id, document_id)
@@ -123,14 +137,19 @@ def save_fixed_document(user_id: str, document_id: str, source_path: Path) -> st
     return pathname
 
 
-def load_fixed_document(user_id: str, document_id: str) -> tuple[bytes, str]:
+def load_fixed_document(
+    user_id: str,
+    document_id: str,
+    *,
+    oidc_token: str | None = None,
+) -> tuple[bytes, str]:
     """
     Load a previously persisted fixed DOCX for the verified owner only.
 
     Missing or cross-user lookups return the same 404.
     """
     if USE_BLOB_STORAGE:
-        return _load_fixed_from_blob(user_id, document_id)
+        return _load_fixed_from_blob(user_id, document_id, oidc_token=oidc_token)
 
     path = temp_fixed_path(user_id, document_id)
     if not path.exists():
@@ -138,14 +157,19 @@ def load_fixed_document(user_id: str, document_id: str) -> tuple[bytes, str]:
     return path.read_bytes(), fixed_filename(document_id)
 
 
-def delete_fixed_document(user_id: str, document_id: str) -> bool:
+def delete_fixed_document(
+    user_id: str,
+    document_id: str,
+    *,
+    oidc_token: str | None = None,
+) -> bool:
     """Delete one owner-scoped fixed document. Returns True if deleted/missing OK."""
     pathname = fixed_pathname(user_id, document_id)
     meta_pathname = fixed_meta_pathname(user_id, document_id)
 
     if USE_BLOB_STORAGE:
         try:
-            auth = _resolve_blob_auth()
+            auth = _resolve_blob_auth(oidc_token=oidc_token)
             _delete_private_blob(pathname, auth)
             _delete_private_blob(meta_pathname, auth)
             return True
@@ -165,10 +189,10 @@ def delete_fixed_document(user_id: str, document_id: str) -> bool:
     return deleted
 
 
-def list_fixed_objects() -> list[StoredFixedObject]:
+def list_fixed_objects(*, oidc_token: str | None = None) -> list[StoredFixedObject]:
     """List fixed documents under the approved namespace only."""
     if USE_BLOB_STORAGE:
-        return _list_fixed_from_blob()
+        return _list_fixed_from_blob(oidc_token=oidc_token)
     return _list_fixed_from_local()
 
 
@@ -230,19 +254,34 @@ def _resolve_store_id() -> Optional[str]:
     return _normalize_store_id(raw)
 
 
-def _resolve_oidc_token() -> str:
-    env_token = os.getenv("VERCEL_OIDC_TOKEN")
-    if env_token:
-        return env_token
+def _resolve_oidc_token(*, oidc_token: str | None = None) -> str:
+    """
+    Resolve Vercel infrastructure OIDC for Blob.
+
+    Preference (official Function runtime model):
+    1. Explicit token from the current request's `x-vercel-oidc-token`
+    2. vercel.oidc helper (ContextVar headers, then env for builds/CLI)
+    3. VERCEL_OIDC_TOKEN env (builds / vercel env pull) as last resort
+
+    Never read the Supabase `Authorization` Bearer here.
+    """
+    explicit = (oidc_token or "").strip()
+    if explicit:
+        return explicit
 
     try:
         from vercel.oidc import get_vercel_oidc_token_sync
-    except ImportError as exc:
-        raise RuntimeError(
-            "vercel.oidc is unavailable; install the 'vercel' package."
-        ) from exc
 
-    return get_vercel_oidc_token_sync()
+        return get_vercel_oidc_token_sync()
+    except Exception:
+        env_token = (os.getenv("VERCEL_OIDC_TOKEN") or "").strip()
+        if env_token:
+            return env_token
+        raise RuntimeError(
+            "Vercel OIDC token unavailable for Blob. "
+            "Ensure the Function request includes x-vercel-oidc-token "
+            "and OIDC is enabled for the project."
+        ) from None
 
 
 def _extract_store_id_from_rw_token(token: str) -> Optional[str]:
@@ -252,7 +291,7 @@ def _extract_store_id_from_rw_token(token: str) -> Optional[str]:
     return None
 
 
-def _resolve_blob_auth() -> _BlobAuth:
+def _resolve_blob_auth(*, oidc_token: str | None = None) -> _BlobAuth:
     rw_token = _resolve_rw_token()
     if rw_token:
         store_id = _extract_store_id_from_rw_token(rw_token) or _resolve_store_id()
@@ -270,13 +309,8 @@ def _resolve_blob_auth() -> _BlobAuth:
             "Connect the Blob store to this project or set BLOB_STORE_ID."
         )
 
-    oidc_token = _resolve_oidc_token()
-    if not oidc_token:
-        raise RuntimeError(
-            "VERCEL_OIDC_TOKEN is missing. Enable OIDC for this Vercel project."
-        )
-
-    return _BlobAuth(token=oidc_token, store_id=store_id, mode="oidc")
+    resolved = _resolve_oidc_token(oidc_token=oidc_token)
+    return _BlobAuth(token=resolved, store_id=store_id, mode="oidc")
 
 
 def _blob_request_id(store_id: str) -> str:
@@ -368,10 +402,10 @@ def _delete_private_blob(pathname: str, auth: _BlobAuth) -> None:
                 )
 
 
-def _list_fixed_from_blob() -> list[StoredFixedObject]:
+def _list_fixed_from_blob(*, oidc_token: str | None = None) -> list[StoredFixedObject]:
     import httpx
 
-    auth = _resolve_blob_auth()
+    auth = _resolve_blob_auth(oidc_token=oidc_token)
     headers = {
         "authorization": f"Bearer {auth.token}",
         "x-api-version": str(BLOB_API_VERSION),
@@ -487,11 +521,11 @@ def _safe_response_snippet(text: str, limit: int = 240) -> str:
 
 
 def _log_blob_failure(operation: str, exc: Exception) -> None:
-    logger.exception(
-        "Vercel Blob %s failed (%s): %s",
+    # Never log token values or exception messages (may echo provider bodies).
+    logger.error(
+        "Vercel Blob %s failed (%s)",
         operation,
         type(exc).__name__,
-        str(exc),
     )
 
 
@@ -500,17 +534,18 @@ def _save_fixed_to_blob(
     document_id: str,
     source_path: Path,
     created_at: float,
+    *,
+    oidc_token: str | None = None,
 ) -> str:
     pathname = fixed_pathname(user_id, document_id)
     meta_pathname = fixed_meta_pathname(user_id, document_id)
 
     try:
-        auth = _resolve_blob_auth()
+        auth = _resolve_blob_auth(oidc_token=oidc_token)
         _put_private_blob(pathname, source_path.read_bytes(), auth)
         meta_bytes = json.dumps(
             {"created_at": created_at, "document_id": document_id}
         ).encode("utf-8")
-        # Reuse put with JSON content-type via temporary header override.
         import httpx
 
         headers = {
@@ -549,11 +584,16 @@ def _save_fixed_to_blob(
     return pathname
 
 
-def _load_fixed_from_blob(user_id: str, document_id: str) -> tuple[bytes, str]:
+def _load_fixed_from_blob(
+    user_id: str,
+    document_id: str,
+    *,
+    oidc_token: str | None = None,
+) -> tuple[bytes, str]:
     pathname = fixed_pathname(user_id, document_id)
 
     try:
-        auth = _resolve_blob_auth()
+        auth = _resolve_blob_auth(oidc_token=oidc_token)
         content = _get_private_blob(pathname, auth)
     except FileNotFoundError as exc:
         _log_blob_failure("get", exc)

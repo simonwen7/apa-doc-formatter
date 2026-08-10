@@ -188,7 +188,7 @@ def test_blob_list_provider_shape_and_delete(monkeypatch, tmp_path):
     monkeypatch.setattr(
         document_store,
         "_resolve_blob_auth",
-        lambda: document_store._BlobAuth(
+        lambda **_kwargs: document_store._BlobAuth(
             token="token", store_id="store123", mode="rw_token"
         ),
     )
@@ -236,7 +236,7 @@ def test_blob_list_provider_shape_and_delete(monkeypatch, tmp_path):
 
     deleted_ids: list[str] = []
 
-    def fake_delete(user_id, document_id):
+    def fake_delete(user_id, document_id, *, oidc_token=None):
         deleted_ids.append(document_id)
         return True
 
@@ -283,7 +283,7 @@ def test_blob_list_provider_error_is_safe(monkeypatch):
     monkeypatch.setattr(
         document_store,
         "_resolve_blob_auth",
-        lambda: document_store._BlobAuth(
+        lambda **_kwargs: document_store._BlobAuth(
             token="token", store_id="store123", mode="rw_token"
         ),
     )
@@ -291,12 +291,11 @@ def test_blob_list_provider_error_is_safe(monkeypatch):
     with pytest.raises(RuntimeError):
         document_store._list_fixed_from_blob()
 
-    report = cleanup_expired_fixed_documents()
     # list failure should not crash batch with uncaught exception when using
     # cleanup's try/except — monkeypatch list to raise
     import app.services.retention_cleanup as cleanup_mod
 
-    def boom_list():
+    def boom_list(**_kwargs):
         raise RuntimeError("provider")
 
     monkeypatch.setattr(cleanup_mod, "list_fixed_objects", boom_list)

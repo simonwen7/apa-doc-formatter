@@ -8,6 +8,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.core import config as app_config
 from app.services.retention_cleanup import cleanup_expired_fixed_documents
+from app.services.vercel_oidc import extract_vercel_oidc_token
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -58,6 +59,7 @@ async def _run_cleanup(
     )
     report = cleanup_expired_fixed_documents(
         retention_hours=app_config.document_retention_hours(),
+        oidc_token=extract_vercel_oidc_token(request),
     )
     return {"ok": True, "cleanup": report.to_dict()}
 
