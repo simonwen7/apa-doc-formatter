@@ -1,8 +1,10 @@
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
+from app.api.auth_deps import AuthenticatedUser
+from app.api.deps import require_authenticated_user
 from app.apa.engine.analyzer import analyze_document_path
 from app.apa.engine.fixer import fix_document_path
 from app.core.config import DOCX_MEDIA_TYPE
@@ -22,11 +24,17 @@ from app.services.parser import parse_docx
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
+_PRIVATE_DOWNLOAD_HEADERS = {
+    "Cache-Control": "private, no-store, no-cache, must-revalidate",
+    "Pragma": "no-cache",
+}
+
 
 @router.post("/analyze")
 async def analyze_document(
     file: UploadFile = File(...),
     template_id: str = Form(...),
+    current_user: AuthenticatedUser = Depends(require_authenticated_user),
 ):
     content = await file.read()
     validate_docx_upload(filename=file.filename, content=content)
@@ -45,7 +53,6 @@ async def analyze_document(
 
     api_payload = analysis.to_api_dict()
 
-    # Compatibility: previous clients expected docx_validation/parsed_validation.
     docx_validation = {
         "summary": {
             **api_payload["summary"],
@@ -79,13 +86,14 @@ async def analyze_document(
 async def fix_document(
     file: UploadFile = File(...),
     template_id: str = Form(...),
+    current_user: AuthenticatedUser = Depends(require_authenticated_user),
 ):
     content = await file.read()
     validate_docx_upload(filename=file.filename, content=content)
 
     document_id = str(uuid4())
     input_path = write_temp_upload(document_id, content)
-    output_path = temp_fixed_path(document_id)
+    output_path = temp_fixed_path(current_user.user_id, document_id)
 
     try:
         fix_result = fix_document_path(
@@ -99,28 +107,33 @@ async def fix_document(
             detail="Unable to format this .docx file. The original upload was not changed.",
         ) from None
 
-    persisted_path = save_fixed_document(document_id, output_path)
+    persisted_path = save_fixed_document(
+        current_user.user_id,
+        document_id,
+        output_path,
+    )
 
     analysis_after = analyze_document_path(str(output_path), template_id=template_id)
     api_after = analysis_after.to_api_dict()
 
     verification = fix_result.get("verification") or {}
     preservation = fix_result.get("preservation") or {}
-    download_token = make_download_token(document_id)
+    download_token = make_download_token(
+        user_id=current_user.user_id,
+        document_id=document_id,
+    )
 
     return {
         "document_id": document_id,
         "filename": file.filename,
         "template": template_id,
-        # Logical storage key only — never expose host filesystem paths.
+        # Logical storage key only — never expose host filesystem / Blob URLs.
         "fixed_file_path": persisted_path,
         "download_url": f"/documents/download/{document_id}?token={download_token}",
         "fixed_counts": fix_result["fixed_counts"],
-        # Legacy-compatible shape retained.
         "validation_after_fix": {
             "summary": api_after["summary"],
             "issues": api_after["issues"],
-            # Additive full schema (shared with Analyze).
             "safe_auto_fix": api_after["safe_auto_fix"],
             "author_action_required": api_after["author_action_required"],
             "uncertain": api_after["uncertain"],
@@ -150,15 +163,27 @@ async def fix_document(
 async def download_fixed_document(
     document_id: str,
     token: str | None = Query(default=None),
+    current_user: AuthenticatedUser = Depends(require_authenticated_user),
 ):
+    """
+    Download requires:
+    1) verified Supabase user (Bearer)
+    2) owner-scoped storage lookup
+    3) user-bound expiring HMAC token (defense in depth)
+    """
     validate_document_id(document_id)
-    verify_download_token(document_id, token)
-    content, filename = load_fixed_document(document_id)
+    verify_download_token(
+        user_id=current_user.user_id,
+        document_id=document_id,
+        token=token,
+    )
+    content, filename = load_fixed_document(current_user.user_id, document_id)
 
     return Response(
         content=content,
         media_type=DOCX_MEDIA_TYPE,
         headers={
+            **_PRIVATE_DOWNLOAD_HEADERS,
             "Content-Disposition": f'attachment; filename="{filename}"',
         },
     )

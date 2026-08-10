@@ -4,6 +4,11 @@ import HeroSection from "./components/HeroSection";
 import HowItWorks from "./components/HowItWorks";
 import PaperSetupPanel from "./components/PaperSetupPanel";
 import {
+  AuthSessionError,
+  authenticatedFetch,
+  downloadAuthenticatedFile,
+} from "./utils/apiClient";
+import {
   getFormattingScoreLabel,
   getFormattingScoreTone,
   normalizeAnalysisResponse,
@@ -221,10 +226,13 @@ function FormatterApp() {
       formData.append("file", file);
       formData.append("template_id", templateId);
 
-      const response = await fetch(`${API_BASE}/documents/analyze`, {
-        method: "POST",
-        body: formData,
-      });
+      const response = await authenticatedFetch(
+        `${API_BASE}/documents/analyze`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
 
       const data = await response.json().catch(() => ({}));
 
@@ -241,8 +249,10 @@ function FormatterApp() {
       setAnalyzeResult(data);
     } catch (requestError) {
       setError(
-        requestError.message ||
-          "We could not analyze this document. Please try again."
+        requestError instanceof AuthSessionError
+          ? requestError.message
+          : requestError.message ||
+              "We could not analyze this document. Please try again."
       );
       setActiveTab("upload");
     } finally {
@@ -272,7 +282,7 @@ function FormatterApp() {
       formData.append("file", file);
       formData.append("template_id", templateId);
 
-      const response = await fetch(`${API_BASE}/documents/fix`, {
+      const response = await authenticatedFetch(`${API_BASE}/documents/fix`, {
         method: "POST",
         body: formData,
       });
@@ -299,8 +309,10 @@ function FormatterApp() {
       }
     } catch (requestError) {
       setError(
-        requestError.message ||
-          "We could not format this document. Please try again."
+        requestError instanceof AuthSessionError
+          ? requestError.message
+          : requestError.message ||
+              "We could not format this document. Please try again."
       );
       setActiveTab("upload");
     } finally {
@@ -324,6 +336,27 @@ function FormatterApp() {
   };
 
   const downloadUrl = getDownloadUrl();
+
+  const handleDownload = async () => {
+    if (!downloadUrl) {
+      return;
+    }
+
+    try {
+      setError("");
+      await downloadAuthenticatedFile(
+        downloadUrl,
+        "formatted.docx"
+      );
+    } catch (requestError) {
+      setError(
+        requestError instanceof AuthSessionError
+          ? requestError.message
+          : requestError.message ||
+              "We could not download the formatted document. Please try again."
+      );
+    }
+  };
 
   return (
     <div className="formatterShell">
@@ -383,6 +416,7 @@ function FormatterApp() {
             visibleFixedCounts={visibleFixedCounts}
             totalFixed={totalFixed}
             downloadUrl={downloadUrl}
+            onDownload={handleDownload}
             formatFileSize={formatFileSize}
             onFileChange={handleFileChange}
             onDrop={handleDrop}

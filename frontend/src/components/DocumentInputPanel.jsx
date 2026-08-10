@@ -19,6 +19,7 @@ export default function DocumentInputPanel({
   visibleFixedCounts,
   totalFixed,
   downloadUrl,
+  onDownload,
   formatFileSize,
   onFileChange,
   onDrop,
@@ -222,6 +223,7 @@ export default function DocumentInputPanel({
               visibleFixedCounts={visibleFixedCounts}
               totalFixed={totalFixed}
               downloadUrl={downloadUrl}
+              onDownload={onDownload}
               onAnalyzeAgain={onAnalyzeAgain}
               onResetWorkflow={onResetWorkflow}
             />

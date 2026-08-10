@@ -6,6 +6,7 @@ export default function FormattingSuccess({
   visibleFixedCounts,
   totalFixed,
   downloadUrl,
+  onDownload,
   onAnalyzeAgain,
   onResetWorkflow,
 }) {
@@ -157,15 +158,14 @@ export default function FormattingSuccess({
 
         <div className="downloadArea">
           {downloadUrl && (
-            <a
+            <button
+              type="button"
               className="downloadButton"
-              href={downloadUrl}
-              target="_blank"
-              rel="noreferrer"
+              onClick={onDownload}
             >
               <span aria-hidden="true">↓</span>
               Download formatted document
-            </a>
+            </button>
           )}
 
           <button

@@ -2,6 +2,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes_documents import router as documents_router
+from app.api.routes_internal import router as internal_router
+from app.core.config import CORS_ALLOWED_ORIGINS
 
 app = FastAPI(
     title="DOC Formatter API",
@@ -10,13 +12,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    # Authorization must be explicitly allowed for authenticated SPA calls.
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Cleanup-Secret"],
+    expose_headers=["Content-Disposition"],
 )
 
 
@@ -38,3 +39,4 @@ async def register_vercel_request_headers(request: Request, call_next):
 
 
 app.include_router(documents_router)
+app.include_router(internal_router)
