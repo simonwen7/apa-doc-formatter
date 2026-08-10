@@ -6,8 +6,9 @@ Never put backend secrets in `VITE_` variables. Never commit `.env` files.
 Accurate retention wording (matches implementation):
 
 > Formatted documents are kept temporarily for download and become eligible for
-> automatic deletion after the retention period (default 24 hours). Removal
-> happens on the next cleanup run (hourly).
+> automatic deletion after the retention period (default 24 hours). On the Hobby
+> deployment, deletion runs once daily, so removal happens on the next daily
+> cleanup run and is not guaranteed exactly at 24 hours.
 
 ---
 
@@ -71,7 +72,8 @@ Blob variables are not required locally (`USE_BLOB_STORAGE` is false unless `VER
 | `VERCEL` | Injected | — | Platform sets `1` |
 | `VERCEL_OIDC_TOKEN` | Injected when OIDC enabled | — | Short-lived |
 
-`vercel.json` already declares hourly cron: `0 * * * *` → `GET /internal/cleanup-fixed-documents`.
+`vercel.json` declares a once-daily cron (Hobby-compatible): `0 5 * * *` (05:00 UTC)
+→ `GET /internal/cleanup-fixed-documents`.
 
 ---
 
@@ -87,14 +89,14 @@ Same as Preview, with:
 
 ### Cleanup architecture
 
-1. Vercel Cron hits `GET /internal/cleanup-fixed-documents` hourly.
+1. Vercel Cron hits `GET /internal/cleanup-fixed-documents` once daily at 05:00 UTC (`0 5 * * *`), which is within Hobby plan limits (at most once per day).
 2. Vercel sends `Authorization: Bearer <CRON_SECRET>` automatically when `CRON_SECRET` is set.
 3. Endpoint deletes only `fixed/{user_id}/{document_id}.docx` (+ meta) older than `DOCUMENT_RETENTION_HOURS`.
 4. Manual ops: `POST` same path with `X-Cleanup-Secret: <CLEANUP_JOB_SECRET|CRON_SECRET>`.
 
 ### Retention semantics
 
-Documents become **eligible** after `DOCUMENT_RETENTION_HOURS` and are removed on the **next successful cleanup run** (hourly). Exact deletion is not guaranteed at minute 0 of expiry.
+`DOCUMENT_RETENTION_HOURS` defaults to **24**. A document becomes **eligible** for deletion after that period, but on the Hobby deployment it is deleted only on the **next daily cleanup run**. Deletion is therefore not guaranteed exactly at 24 hours and may occur later depending on when the next scheduled cron executes.
 
 ---
 
