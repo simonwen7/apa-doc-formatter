@@ -439,3 +439,61 @@ def build_multi_section_page_numbers(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(path)
     return path
+
+
+def build_heading1_title_cascade_paper(path: Path) -> Path:
+    """
+    Synthetic regression fixture for iterative fix convergence.
+
+    Reproduces the MRR failure mode without user-authored content:
+    - paragraph[0] is a left-aligned Level 1 heading (HEADING1-CENTER in pass 1)
+    - centering reclassifies paragraph[0] to PAPER_TITLE, exposing TITLE-004
+    - downstream body-start shift exposes BODY-001 on the first Level 2 heading
+    """
+    doc = Document()
+    _set_margins(doc, 1.0)
+
+    title_heading = doc.add_paragraph("Synthetic Regression Paper Title")
+    title_heading.style = doc.styles["Heading 1"]
+    title_heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    for text in (
+        "Regression Test Author",
+        "Regression Test University",
+        "TEST 101: Synthetic Course",
+        "Dr. Regression Instructor",
+        "January 1, 2026",
+    ):
+        meta = doc.add_paragraph(text)
+        meta.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+        meta.paragraph_format.line_spacing = 1.0
+        meta.paragraph_format.space_before = Pt(12)
+        meta.paragraph_format.space_after = Pt(12)
+        meta.paragraph_format.first_line_indent = Inches(0)
+
+    for index in range(15):
+        filler = doc.add_paragraph(
+            f"Filler body paragraph {index + 1} used for title-page cascade testing."
+        )
+        filler.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+        filler.paragraph_format.line_spacing = 1.0
+        filler.paragraph_format.space_before = Pt(12)
+        filler.paragraph_format.space_after = Pt(12)
+        filler.paragraph_format.first_line_indent = Inches(0)
+
+    section_heading = doc.add_paragraph("Synthetic Section Heading")
+    section_heading.style = doc.styles["Heading 2"]
+    section_heading.paragraph_format.page_break_before = False
+
+    body = doc.add_paragraph(
+        "Synthetic body content following the first Level 2 heading in the fixture."
+    )
+    body.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+    body.paragraph_format.line_spacing = 1.0
+    body.paragraph_format.space_before = Pt(12)
+    body.paragraph_format.space_after = Pt(12)
+    body.paragraph_format.first_line_indent = Inches(0)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(path)
+    return path

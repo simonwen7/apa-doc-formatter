@@ -9,13 +9,13 @@ from fastapi import HTTPException
 from app.apa.engine.analyzer import analyze_document, analyze_document_path
 from app.apa.engine.classifier import classify_document
 from app.apa.engine.verifier import verify_fix_result
-from app.apa.models import SPECIALIZED_REGIONS, Fixability, Region
+from app.apa.models import SPECIALIZED_REGIONS, Fixability, Issue, Region
 from app.apa.parsing.docx_objects import (
     compare_document_preservation,
     snapshot_image_binaries,
 )
 from app.apa.profile import PROFILE_ID
-from app.apa.registry import get_rule
+from app.apa.registry import get_rule, production_safe_rules
 from app.apa.registry.base import RuleContext
 from app.apa.text_integrity import (
     TextIntegrityError,
@@ -24,6 +24,10 @@ from app.apa.text_integrity import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Bounded iteration cap — MRR-like cascades converge in 2 passes; 5 allows
+# deeper title-page / heading reclassification chains without unbounded work.
+MAX_FIX_PASSES = 5
 
 # Generic body formatting rules must not apply to specialized regions.
 _BODY_GENERIC_RULE_IDS = frozenset(
@@ -51,32 +55,29 @@ def _issue_conflicts_with_region(issue, classified) -> bool:
     return False
 
 
-def fix_document_path(
-    input_path: str,
-    output_path: str,
-    template_id: str = PROFILE_ID,
-) -> dict:
-    """
-    Production Fix pipeline (Phase 2A–2D).
+def _production_safe_remaining(analysis, template_id: str) -> list[Issue]:
+    """SAFE issues counted by post-fix verification (production-supported rules)."""
+    production_ids = {rule.rule_id for rule in production_safe_rules(template_id)}
+    return [issue for issue in analysis.safe_auto_fix if issue.rule_id in production_ids]
 
-    - Analyzes first
-    - Applies ONLY SAFE_AUTO_FIX rules for detected issues
-    - Never rewrites user-authored characters
-    - Rejects output on text-integrity or package-preservation failure
-    - Verifies remaining SAFE issues == 0 for production-supported rules
-    """
-    doc = Document(input_path)
-    before_snapshot = snapshot_user_text(doc)
-    before_images = snapshot_image_binaries(doc)
 
-    analysis_before = analyze_document(doc, template_id=template_id)
-    classified = classify_document(doc)
-    context = RuleContext(doc=doc, classified=classified, template_id=template_id)
+def _safe_issue_signature(issues: list[Issue]) -> frozenset[tuple[str, str]]:
+    """Deterministic remaining-SAFE fingerprint for oscillation detection."""
+    return frozenset((issue.rule_id, issue.location) for issue in issues)
 
+
+def _apply_safe_fixes_for_pass(
+    doc: Document,
+    classified,
+    context: RuleContext,
+    analysis,
+    template_id: str,
+) -> tuple[int, list[str]]:
+    """Apply one pass of SAFE_AUTO_FIX issues from the current analysis snapshot."""
     fixes_applied = 0
     applied_rule_ids: list[str] = []
 
-    for issue in analysis_before.safe_auto_fix:
+    for issue in analysis.safe_auto_fix:
         if issue.fixability != Fixability.SAFE_AUTO_FIX or not issue.can_fix:
             continue
         if _issue_conflicts_with_region(issue, classified):
@@ -101,6 +102,76 @@ def fix_document_path(
         if changed:
             fixes_applied += 1
             applied_rule_ids.append(issue.rule_id)
+
+    return fixes_applied, applied_rule_ids
+
+
+def fix_document_path(
+    input_path: str,
+    output_path: str,
+    template_id: str = PROFILE_ID,
+) -> dict:
+    """
+    Production Fix pipeline (Phase 2A–2D).
+
+    - Analyzes and applies SAFE_AUTO_FIX rules in bounded iterative passes
+    - Never rewrites user-authored characters
+    - Rejects output on text-integrity or package-preservation failure
+    - Verifies remaining SAFE issues == 0 for production-supported rules
+    """
+    doc = Document(input_path)
+    before_snapshot = snapshot_user_text(doc)
+    before_images = snapshot_image_binaries(doc)
+
+    analysis_before = analyze_document(doc, template_id=template_id)
+
+    fixes_applied = 0
+    applied_rule_ids: list[str] = []
+    seen_signatures: set[frozenset[tuple[str, str]]] = set()
+    fix_passes_executed = 0
+
+    for pass_index in range(MAX_FIX_PASSES):
+        analysis = analyze_document(doc, template_id=template_id)
+        remaining = _production_safe_remaining(analysis, template_id)
+
+        if not remaining:
+            break
+
+        signature = _safe_issue_signature(remaining)
+        if signature in seen_signatures:
+            logger.info(
+                "fix_iteration_stopped reason=oscillation pass=%s remaining=%s",
+                pass_index,
+                len(remaining),
+            )
+            break
+        seen_signatures.add(signature)
+
+        classified = classify_document(doc)
+        context = RuleContext(doc=doc, classified=classified, template_id=template_id)
+        pass_fixes, pass_rule_ids = _apply_safe_fixes_for_pass(
+            doc,
+            classified,
+            context,
+            analysis,
+            template_id,
+        )
+        fix_passes_executed += 1
+        fixes_applied += pass_fixes
+        applied_rule_ids.extend(pass_rule_ids)
+
+        if pass_fixes == 0:
+            logger.info(
+                "fix_iteration_stopped reason=no_progress pass=%s remaining=%s",
+                pass_index,
+                len(remaining),
+            )
+            break
+    else:
+        logger.info(
+            "fix_iteration_stopped reason=max_passes remaining=%s",
+            len(_production_safe_remaining(analyze_document(doc, template_id=template_id), template_id)),
+        )
 
     after_snapshot = snapshot_user_text(doc)
     text_ok = True
@@ -180,6 +251,7 @@ def fix_document_path(
 
     fixed_counts = {
         "safe_rules_applied": fixes_applied,
+        "fix_passes_executed": fix_passes_executed,
         "applied_rule_ids": len(set(applied_rule_ids)),
         "margins": sum(1 for r in applied_rule_ids if r == "APA7-GLOBAL-001"),
         "line_spacing": sum(

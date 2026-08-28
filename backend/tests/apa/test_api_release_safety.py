@@ -162,3 +162,64 @@ def test_fix_returns_tokenized_download_url(client, misformatted_docx):
     downloaded = client.get(payload["download_url"], headers=_headers())
     assert downloaded.status_code == 200
     assert len(downloaded.content) > 1000
+
+
+def test_fix_route_preserves_fixer_http_exception(client, misformatted_docx, monkeypatch):
+    from fastapi import HTTPException
+
+    def verification_failure(*_args, **_kwargs):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Formatting verification failed. Remaining auto-fixable issues "
+                "were detected after fix; no downloadable file was produced."
+            ),
+        )
+
+    monkeypatch.setattr(
+        "app.api.routes_documents.fix_document_path",
+        verification_failure,
+    )
+
+    response = client.post(
+        "/documents/fix",
+        data={"template_id": "apa7_student"},
+        headers=_headers(),
+        files={
+            "file": (
+                "mis.docx",
+                misformatted_docx.read_bytes(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert response.status_code == 500
+    assert "verification failed" in response.json()["detail"].lower()
+
+
+def test_fix_route_generic_error_on_unexpected_exception(client, misformatted_docx, monkeypatch):
+    def unexpected_failure(*_args, **_kwargs):
+        raise ValueError("sensitive internal traceback detail")
+
+    monkeypatch.setattr(
+        "app.api.routes_documents.fix_document_path",
+        unexpected_failure,
+    )
+
+    response = client.post(
+        "/documents/fix",
+        data={"template_id": "apa7_student"},
+        headers=_headers(),
+        files={
+            "file": (
+                "mis.docx",
+                misformatted_docx.read_bytes(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Unable to format this .docx file. The original upload was not changed."
+    )
+    assert "traceback" not in response.json()["detail"].lower()
